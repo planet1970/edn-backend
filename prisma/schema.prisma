@@ -1,0 +1,287 @@
+// Prisma schema for EDN backend
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  EXAM_OFFICER
+  VIEWER
+}
+
+model User {
+  id            Int      @id @default(autoincrement())
+  email         String   @unique
+  password      String?
+  name          String?
+  phone         String?
+  googleId      String?
+  imageUrl      String?
+  role          Role     @default(VIEWER)
+  createdPlaces Place[]  @relation("CreatedPlaces")
+  updatedPlaces Place[]  @relation("UpdatedPlaces")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Category {
+  id            Int            @id @default(autoincrement())
+  title         String
+  description   String?
+  iconName      String?
+  webIcon       String?
+  order         Int            @default(1)
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime @updatedAt
+  subCategories SubCategory[]
+  pagePlans     PagePlan[] // Inverse relation
+  places        Place[]
+}
+
+model SubCategory {
+  id          Int       @id @default(autoincrement())
+  title       String
+  description String?
+  imageUrl    String?
+  pageDesign  String?
+  order       Int       @default(1)
+  isActive    Boolean   @default(true)
+  category    Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  categoryId  Int
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  pagePlans   PagePlan[] // Inverse relation
+  places      Place[]
+  foodPlaces  FoodPlace[]
+}
+
+model Place {
+  id               Int      @id @default(autoincrement())
+  title            String
+  slug             String?
+  pic_url          String?
+  back_pic_url     String?
+  icon1            String?
+  title1           String?
+  info1            String?
+  icon2            String?
+  title2           String?
+  info2            String?
+  icon3            String?
+  title3           String?
+  info3            String?
+  icon4            String?
+  title4           String?
+  info4            String?
+  description      String?
+  rating           Float?
+  panel1_title     String?
+  panel1           String?
+  panel2_title     String?
+  panel2           String?
+  panel_col_title  String?
+  panel_col        String?
+  panel3_title     String?
+
+  panel3           String?
+  panel4_title     String?
+  panel4           String?
+  panel_col_title2 String?
+  panel_col2       String?
+  panel5_title     String?
+  area1            String?
+  area2            String?
+  area3            String?
+  area4            String?
+  area5            String?
+  area6            String?
+  area7            String?
+  area8            String?
+  area9            String?
+  area10           String?
+  source           String?
+  order            Int      @default(0)
+  isActive         Boolean  @default(true)
+  category         Category? @relation(fields: [categoryId], references: [id])
+  categoryId       Int?
+  subCategory      SubCategory? @relation(fields: [subCategoryId], references: [id])
+  subCategoryId    Int?
+  createdBy        User?    @relation("CreatedPlaces", fields: [createdById], references: [id])
+  createdById      Int?
+  updatedBy        User?    @relation("UpdatedPlaces", fields: [updatedById], references: [id])
+  updatedById      Int?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model PagePlan {
+  id               String   @id @default(uuid())
+  categoryId       Int
+  subCategoryId    Int
+  pageDefinitionId String
+  slug             String?
+  source           String?
+  pageTitle        String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  category         Category   @relation(fields: [categoryId], references: [id])
+  subCategory      SubCategory @relation(fields: [subCategoryId], references: [id])
+}
+
+model PageDefinition {
+    id          String   @id @default(uuid())
+    title       String
+    description String?
+    isActive    Boolean  @default(true)
+    dbId        String
+    fields      Json
+    createdAt   DateTime @default(now())
+    updatedAt   DateTime @updatedAt
+}
+
+model PageLink {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String?
+  slug        String   @unique
+  targetTable String   @default("PLACE") // "PLACE" or "FOOD_PLACE"
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model FoodPlace {
+  id            Int         @id @default(autoincrement())
+  title         String
+  slug          String?
+  subtitle      String?
+  mainColor     String?
+  imageUrl      String?
+  backImageUrl  String?
+  campaignUrl   String?
+  badge         String?
+  rating        Float?
+  storyTitle    String?
+  frontContent  String?
+  backContent   String?
+  phone         String?
+  hoursEveryday String?
+  hoursMon      String?
+  hoursTue      String?
+  hoursWed      String?
+  hoursThu      String?
+  hoursFri      String?
+  hoursSat      String?
+  hoursSun      String?
+  menuItem1     String?
+  menuDesc1     String?
+  menuPrice1    String?
+  menuItem2     String?
+  menuDesc2     String?
+  menuPrice2    String?
+  menuItem3     String?
+  menuDesc3     String?
+  menuPrice3    String?
+  menuItem4     String?
+  menuDesc4     String?
+  menuPrice4    String?
+  menuItem5     String?
+  menuDesc5     String?
+  menuPrice5    String?
+  menuItem6     String?
+  menuDesc6     String?
+  menuPrice6    String?
+  menuItem7     String?
+  menuDesc7     String?
+  menuPrice7    String?
+  menuItem8     String?
+  menuDesc8     String?
+  menuPrice8    String?
+  menuItem9     String?
+  menuDesc9     String?
+  menuPrice9    String?
+  menuItem10    String?
+  menuDesc10    String?
+  menuPrice10   String?
+  features      String?
+  address       String?
+  website       String?
+  field1        String?
+  field2        String?
+  field3        String?
+  field4        String?
+  field5        String?
+  isActive      Boolean     @default(true)
+  subCategory   SubCategory @relation(fields: [subCategoryId], references: [id])
+  subCategoryId Int
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+}
+
+model SplashScreen {
+  id              Int      @id @default(autoincrement())
+  backgroundColor String?
+  logoUrl         String?
+  duration        Int      @default(3000)
+  tagline         String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model OnboardingScreen {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String
+  imageUrl    String
+  icon        String?  @default("map")
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model WebHeroSlide {
+  id          String   @id @default(uuid())
+  title       String?
+  subtitle    String?
+  description String?
+  imageUrl    String?
+  order       Int      @default(0)
+  createdAt   DateTime @default(now())
+  titleColor       String?  @default("#FFB627")
+  subtitleColor    String?  @default("#FFFFFF")
+  descriptionColor String?  @default("#FFFFFF")
+  titleShadowColor String?  @default("rgba(0,0,0,0.9)")
+  updatedAt        DateTime @updatedAt
+}
+
+model WebSocialInfo {
+  id        Int      @id @default(autoincrement())
+  phone     String?
+  email     String?
+  address   String?
+  facebook  String?
+  instagram String?
+  twitter   String?
+  youtube   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+model WebNavbar {
+  id          Int      @id @default(autoincrement())
+  logoUrl     String?
+  title       String?
+  titleColor  String?  @default("#333333")
+  fontFamily  String?  @default("Inter")
+  fontSize    Int?     @default(24)
+  bgColor     String?  @default("#1A1A2E")
+  iconColor   String?  @default("#FFB627")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

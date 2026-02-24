@@ -1,0 +1,5 @@
+{
+  "name": "edn-backend",
+  "description": "Backend API service for Mobile and Web applications using NestJS and PostgreSQL.",
+  "requestFramePermissions": []
+}
