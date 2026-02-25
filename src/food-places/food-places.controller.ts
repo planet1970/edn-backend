@@ -1,34 +1,44 @@
 import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseInterceptors, UploadedFiles } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { FoodPlacesService } from './food-places.service';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
 import { CreateFoodPlaceDto } from './dto/create-food-place.dto';
 import { UpdateFoodPlaceDto } from './dto/update-food-place.dto';
+import { multerStorage } from 'src/common/upload/upload.config';
+import { UploadService } from 'src/common/upload/upload.service';
 
 @Controller('food-places')
 export class FoodPlacesController {
-    constructor(private readonly foodPlacesService: FoodPlacesService) { }
+    constructor(
+        private readonly foodPlacesService: FoodPlacesService,
+        private readonly uploadService: UploadService,
+    ) { }
 
     @Post()
     @UseInterceptors(FileFieldsInterceptor([
         { name: 'file', maxCount: 1 },
         { name: 'back_file', maxCount: 1 }
     ], {
-        storage: diskStorage({
-            destination: './uploads/foods',
-            filename: (req, file, cb) => {
-                const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-                cb(null, `${uniqueSuffix}${extname(file.originalname)}`);
-            }
-        })
+        storage: multerStorage
     }))
-    create(
+    async create(
         @Body() createFoodPlaceDto: CreateFoodPlaceDto,
-        @UploadedFiles() files: { file?: Express.Multer.File[], back_file?: Express.Multer.File[] }
+        @UploadedFiles()
+        files: { file?: Express.Multer.File[]; back_file?: Express.Multer.File[] },
     ) {
-        if (files.file) createFoodPlaceDto.imageUrl = `/uploads/foods/${files.file[0].filename}`;
-        if (files.back_file) createFoodPlaceDto.backImageUrl = `/uploads/foods/${files.back_file[0].filename}`;
+        if (files.file?.[0]) {
+            createFoodPlaceDto.imageUrl = await this.uploadService.handleFile(
+                files.file[0],
+                'foods',
+            );
+        }
+
+        if (files.back_file?.[0]) {
+            createFoodPlaceDto.backImageUrl = await this.uploadService.handleFile(
+                files.back_file[0],
+                'foods',
+            );
+        }
+
         return this.foodPlacesService.create(createFoodPlaceDto);
     }
 
@@ -47,21 +57,25 @@ export class FoodPlacesController {
         { name: 'file', maxCount: 1 },
         { name: 'back_file', maxCount: 1 }
     ], {
-        storage: diskStorage({
-            destination: './uploads/foods',
-            filename: (req, file, cb) => {
-                const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-                cb(null, `${uniqueSuffix}${extname(file.originalname)}`);
-            }
-        })
+        storage: multerStorage
     }))
-    update(
+    async update(
         @Param('id') id: string,
         @Body() updateFoodPlaceDto: UpdateFoodPlaceDto,
         @UploadedFiles() files: { file?: Express.Multer.File[], back_file?: Express.Multer.File[] }
     ) {
-        if (files?.file) updateFoodPlaceDto.imageUrl = `/uploads/foods/${files.file[0].filename}`;
-        if (files?.back_file) updateFoodPlaceDto.backImageUrl = `/uploads/foods/${files.back_file[0].filename}`;
+        if (files?.file?.[0]) {
+            updateFoodPlaceDto.imageUrl = await this.uploadService.handleFile(
+                files.file[0],
+                'foods',
+            );
+        }
+        if (files?.back_file?.[0]) {
+            updateFoodPlaceDto.backImageUrl = await this.uploadService.handleFile(
+                files.back_file[0],
+                'foods',
+            );
+        }
         return this.foodPlacesService.update(+id, updateFoodPlaceDto);
     }
 

@@ -1,16 +1,18 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, UseInterceptors, UploadedFile, Res, HttpStatus } from '@nestjs/common';
 import { OnboardingService } from './onboarding.service';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
-import { v4 as uuid } from 'uuid';
 import { Response } from 'express';
 import { ApiTags } from '@nestjs/swagger';
+import { multerStorage } from 'src/common/upload/upload.config';
+import { UploadService } from 'src/common/upload/upload.service';
 
 @ApiTags('onboarding')
 @Controller('onboarding')
 export class OnboardingController {
-    constructor(private readonly onboardingService: OnboardingService) { }
+    constructor(
+        private readonly onboardingService: OnboardingService,
+        private readonly uploadService: UploadService,
+    ) { }
 
     @Get()
     findAll() {
@@ -20,13 +22,7 @@ export class OnboardingController {
     @Post()
     @UseInterceptors(
         FileInterceptor('file', {
-            storage: diskStorage({
-                destination: './uploads/main',
-                filename: (req, file, cb) => {
-                    const randomName = uuid();
-                    cb(null, `${randomName}${extname(file.originalname)}`);
-                },
-            }),
+            storage: multerStorage,
         }),
     )
     async create(
@@ -44,7 +40,7 @@ export class OnboardingController {
             };
 
             if (file) {
-                data.imageUrl = `/uploads/main/${file.filename}`;
+                data.imageUrl = await this.uploadService.handleFile(file, 'main');
             }
 
             const result = await this.onboardingService.create(data);
@@ -57,13 +53,7 @@ export class OnboardingController {
     @Put(':id')
     @UseInterceptors(
         FileInterceptor('file', {
-            storage: diskStorage({
-                destination: './uploads/main',
-                filename: (req, file, cb) => {
-                    const randomName = uuid();
-                    cb(null, `${randomName}${extname(file.originalname)}`);
-                },
-            }),
+            storage: multerStorage,
         }),
     )
     async update(
@@ -85,7 +75,7 @@ export class OnboardingController {
             }
 
             if (file) {
-                data.imageUrl = `/uploads/main/${file.filename}`;
+                data.imageUrl = await this.uploadService.handleFile(file, 'main');
             }
 
             const result = await this.onboardingService.update(id, data);

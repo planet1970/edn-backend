@@ -9,28 +9,27 @@ import { Roles } from 'src/auth/decorators/roles.decorator';
 import { Role } from '@prisma/client';
 import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
-import { v4 as uuid } from 'uuid';
+import { UploadService } from 'src/common/upload/upload.service';
+import { multerStorage } from 'src/common/upload/upload.config';
 
 @ApiBearerAuth()
 @ApiTags("subcategories")
 @Controller("subcategories")
 export class SubcategoriesController {
-    constructor(private readonly subcategoriesService: SubcategoriesService) { }
+    constructor(
+        private readonly subcategoriesService: SubcategoriesService,
+        private readonly uploadService: UploadService,
+    ) { }
 
     @Post()
     @UseGuards(AuthGuard("jwt"), RoleGuard)
     @Roles(Role.ADMIN, Role.EXAM_OFFICER)
     @UseInterceptors(
         FileInterceptor("file", {
-            storage: diskStorage({
-                destination: "./uploads/subcategories",
-                filename: (req, file, cb) => {
-                    const randomName = uuid();
-                    cb(null, `${randomName}${extname(file.originalname)}`);
-                },
-            }),
+            storage: multerStorage,
+            limits: {
+                fileSize: 5 * 1024 * 1024, // 5MB limit
+            },
         })
     )
     async create(
@@ -40,11 +39,16 @@ export class SubcategoriesController {
     ) {
         try {
             if (file) {
-                createSubcategoryDto.imageUrl = `/uploads/subcategories/${file.filename}`;
+                createSubcategoryDto.imageUrl = await this.uploadService.handleFile(
+                    file,
+                    "subcategories"
+                );
             }
+
             const subcategory = await this.subcategoriesService.create(
                 createSubcategoryDto
             );
+
             return res.status(HttpStatus.CREATED).json(subcategory);
         } catch (error) {
             return res
@@ -69,13 +73,10 @@ export class SubcategoriesController {
     @Roles(Role.ADMIN, Role.EXAM_OFFICER)
     @UseInterceptors(
         FileInterceptor("file", {
-            storage: diskStorage({
-                destination: "./uploads/subcategories",
-                filename: (req, file, cb) => {
-                    const randomName = uuid();
-                    cb(null, `${randomName}${extname(file.originalname)}`);
-                },
-            }),
+            storage: multerStorage,
+            limits: {
+                fileSize: 5 * 1024 * 1024, // 5MB limit
+            },
         })
     )
     async update(
@@ -86,7 +87,10 @@ export class SubcategoriesController {
     ) {
         try {
             if (file) {
-                updateSubcategoryDto.imageUrl = `/uploads/subcategories/${file.filename}`;
+                updateSubcategoryDto.imageUrl = await this.uploadService.handleFile(
+                    file,
+                    "subcategories"
+                );
             }
             const subcategory = await this.subcategoriesService.update(
                 +id,

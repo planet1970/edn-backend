@@ -4,12 +4,14 @@ import { CreateWebHeroDto } from './dto/create-web-hero.dto';
 import { UpdateWebHeroDto } from './dto/update-web-hero.dto';
 import { UpdateSocialInfoDto } from './dto/update-social-info.dto';
 import { UpdateNavbarDto } from './dto/update-navbar.dto';
-import * as fs from 'fs';
-import * as path from 'path';
+import { UploadService } from '../common/upload/upload.service';
 
 @Injectable()
 export class WebHomeService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private readonly uploadService: UploadService,
+    ) { }
 
     // --- HERO SLIDES ---
 
@@ -18,14 +20,7 @@ export class WebHomeService {
             let imageUrl = createDto.imageUrl;
 
             if (file) {
-                const uploadPath = path.join(process.cwd(), 'uploads', 'hero');
-                if (!fs.existsSync(uploadPath)) {
-                    fs.mkdirSync(uploadPath, { recursive: true });
-                }
-                const fileName = `${Date.now()}-${file.originalname}`;
-                const filePath = path.join(uploadPath, fileName);
-                fs.writeFileSync(filePath, file.buffer);
-                imageUrl = `/uploads/hero/${fileName}`;
+                imageUrl = await this.uploadService.handleFile(file, 'hero');
             }
 
             return await this.prisma.webHeroSlide.create({
@@ -54,14 +49,7 @@ export class WebHomeService {
         let imageUrl = updateDto.imageUrl || slide.imageUrl;
 
         if (file) {
-            const uploadPath = path.join(process.cwd(), 'uploads', 'hero');
-            if (!fs.existsSync(uploadPath)) {
-                fs.mkdirSync(uploadPath, { recursive: true });
-            }
-            const fileName = `${Date.now()}-${file.originalname}`;
-            const filePath = path.join(uploadPath, fileName);
-            fs.writeFileSync(filePath, file.buffer);
-            imageUrl = `/uploads/hero/${fileName}`;
+            imageUrl = await this.uploadService.handleFile(file, 'hero');
         }
 
         return this.prisma.webHeroSlide.update({
@@ -77,18 +65,6 @@ export class WebHomeService {
     async removeHero(id: string) {
         const slide = await this.prisma.webHeroSlide.findUnique({ where: { id } });
         if (!slide) throw new NotFoundException('Hero slide not found');
-
-        // Optionally delete file
-        if (slide.imageUrl && slide.imageUrl.startsWith('/uploads/hero/')) {
-            try {
-                const filePath = path.join(process.cwd(), slide.imageUrl.substring(1)); // remove leading slash
-                if (fs.existsSync(filePath)) {
-                    fs.unlinkSync(filePath);
-                }
-            } catch (e) {
-                console.warn("Failed to delete file", e);
-            }
-        }
 
         return this.prisma.webHeroSlide.delete({ where: { id } });
     }
@@ -131,14 +107,7 @@ export class WebHomeService {
         let logoUrl = updateDto.logoUrl;
 
         if (file) {
-            const uploadPath = path.join(process.cwd(), 'uploads', 'logo');
-            if (!fs.existsSync(uploadPath)) {
-                fs.mkdirSync(uploadPath, { recursive: true });
-            }
-            const fileName = `${Date.now()}-${file.originalname}`;
-            const filePath = path.join(uploadPath, fileName);
-            fs.writeFileSync(filePath, file.buffer);
-            logoUrl = `/uploads/logo/${fileName}`;
+            logoUrl = await this.uploadService.handleFile(file, 'logo');
         }
 
         console.log('Update Navbar DTO:', updateDto);

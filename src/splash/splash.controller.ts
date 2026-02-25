@@ -1,16 +1,18 @@
 import { Controller, Get, Put, Body, UseInterceptors, UploadedFile, Res, HttpStatus } from '@nestjs/common';
 import { SplashService } from './splash.service';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { extname } from 'path';
-import { v4 as uuid } from 'uuid';
 import { Response } from 'express';
 import { ApiTags } from '@nestjs/swagger';
+import { UploadService } from 'src/common/upload/upload.service';
+import { multerStorage } from 'src/common/upload/upload.config';
 
 @ApiTags('splash')
 @Controller('splash')
 export class SplashController {
-    constructor(private readonly splashService: SplashService) { }
+    constructor(
+        private readonly splashService: SplashService,
+        private readonly uploadService: UploadService,
+    ) { }
 
     @Get()
     async findOne() {
@@ -20,13 +22,7 @@ export class SplashController {
     @Put()
     @UseInterceptors(
         FileInterceptor('file', {
-            storage: diskStorage({
-                destination: './uploads/main',
-                filename: (req, file, cb) => {
-                    const randomName = uuid();
-                    cb(null, `${randomName}${extname(file.originalname)}`);
-                },
-            }),
+            storage: multerStorage,
         }),
     )
     async update(
@@ -43,7 +39,7 @@ export class SplashController {
             };
 
             if (file) {
-                data.logoUrl = `/uploads/main/${file.filename}`;
+                data.logoUrl = await this.uploadService.handleFile(file, 'main');
             }
 
             const result = await this.splashService.update(data);

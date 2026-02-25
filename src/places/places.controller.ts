@@ -1,9 +1,10 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, ParseIntPipe, UseInterceptors, UploadedFile, Query, UploadedFiles } from '@nestjs/common';
-import { FileInterceptor, FileFieldsInterceptor, AnyFilesInterceptor } from '@nestjs/platform-express';
+import { Controller, Get, Post, Body, Patch, Param, Delete, ParseIntPipe, UseInterceptors, Query, UploadedFiles } from '@nestjs/common';
+import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import { PlacesService } from './places.service';
 import { CreatePlaceDto } from './dto/create-place.dto';
 import { UpdatePlaceDto } from './dto/update-place.dto';
 import { ApiTags } from '@nestjs/swagger';
+import { multerStorage } from 'src/common/upload/upload.config';
 
 @ApiTags('places')
 @Controller('places')
@@ -11,7 +12,9 @@ export class PlacesController {
     constructor(private readonly placesService: PlacesService) { }
 
     @Post()
-    @UseInterceptors(AnyFilesInterceptor())
+    @UseInterceptors(AnyFilesInterceptor({
+        storage: multerStorage
+    }))
     create(@Body() createPlaceDto: CreatePlaceDto, @UploadedFiles() files: Express.Multer.File[]) {
         // TODO: Implement get current user id from request
         const userId = 1;
@@ -32,7 +35,9 @@ export class PlacesController {
     }
 
     @Patch(':id')
-    @UseInterceptors(AnyFilesInterceptor())
+    @UseInterceptors(AnyFilesInterceptor({
+        storage: multerStorage
+    }))
     update(@Param('id', ParseIntPipe) id: number, @Body() updatePlaceDto: UpdatePlaceDto, @UploadedFiles() files: Express.Multer.File[]) {
         // TODO: Implement get current user id from request
         const userId = 1;

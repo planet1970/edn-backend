@@ -3,37 +3,25 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreatePlaceDto } from './dto/create-place.dto';
 import { UpdatePlaceDto } from './dto/update-place.dto';
 import { Place } from '@prisma/client';
-import * as fs from 'fs';
-import * as path from 'path';
+import { UploadService } from '../common/upload/upload.service';
 
 @Injectable()
 export class PlacesService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private readonly uploadService: UploadService,
+    ) { }
 
     async create(createPlaceDto: CreatePlaceDto, userId: number, file?: Express.Multer.File, backFile?: Express.Multer.File): Promise<Place> {
         try {
             let pic_url = createPlaceDto.pic_url || null;
             if (file) {
-                const uploadPath = path.join(process.cwd(), 'uploads', 'places');
-                if (!fs.existsSync(uploadPath)) {
-                    fs.mkdirSync(uploadPath, { recursive: true });
-                }
-                const fileName = `${Date.now()}-${file.originalname}`;
-                const filePath = path.join(uploadPath, fileName);
-                fs.writeFileSync(filePath, file.buffer);
-                pic_url = `/uploads/places/${fileName}`;
+                pic_url = await this.uploadService.handleFile(file, 'places');
             }
 
             let back_pic_url = createPlaceDto.back_pic_url || null;
             if (backFile) {
-                const uploadPath = path.join(process.cwd(), 'uploads', 'places');
-                if (!fs.existsSync(uploadPath)) {
-                    fs.mkdirSync(uploadPath, { recursive: true });
-                }
-                const fileName = `${Date.now()}-back-${backFile.originalname}`;
-                const filePath = path.join(uploadPath, fileName);
-                fs.writeFileSync(filePath, backFile.buffer);
-                back_pic_url = `/uploads/places/${fileName}`;
+                back_pic_url = await this.uploadService.handleFile(backFile, 'places');
             }
 
             const dataToCreate: any = {
@@ -68,7 +56,6 @@ export class PlacesService {
             }
 
             let user = await this.prisma.user.findFirst();
-            // ... (rest of user logic is same)
             if (!user) {
                 try {
                     user = await this.prisma.user.create({
@@ -127,26 +114,12 @@ export class PlacesService {
 
         let pic_url = updatePlaceDto.pic_url || existingPlace.pic_url;
         if (file) {
-            const uploadPath = path.join(process.cwd(), 'uploads', 'places');
-            if (!fs.existsSync(uploadPath)) {
-                fs.mkdirSync(uploadPath, { recursive: true });
-            }
-            const fileName = `${Date.now()}-${file.originalname}`;
-            const filePath = path.join(uploadPath, fileName);
-            fs.writeFileSync(filePath, file.buffer);
-            pic_url = `/uploads/places/${fileName}`;
+            pic_url = await this.uploadService.handleFile(file, 'places');
         }
 
         let back_pic_url = updatePlaceDto.back_pic_url || existingPlace.back_pic_url;
         if (backFile) {
-            const uploadPath = path.join(process.cwd(), 'uploads', 'places');
-            if (!fs.existsSync(uploadPath)) {
-                fs.mkdirSync(uploadPath, { recursive: true });
-            }
-            const fileName = `${Date.now()}-back-${backFile.originalname}`;
-            const filePath = path.join(uploadPath, fileName);
-            fs.writeFileSync(filePath, backFile.buffer);
-            back_pic_url = `/uploads/places/${fileName}`;
+            back_pic_url = await this.uploadService.handleFile(backFile, 'places');
         }
 
         const dataToUpdate: any = {
