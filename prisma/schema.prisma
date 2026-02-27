@@ -18,12 +18,15 @@ enum Role {
 model User {
   id            Int      @id @default(autoincrement())
   email         String   @unique
+  username      String?  @unique // Custom username chosen by the user
   password      String?
   name          String?
   phone         String?
   googleId      String?
   imageUrl      String?
+  isEdirnelim   Boolean  @default(false) // Toggle for local community
   role          Role     @default(VIEWER)
+  visitorId     String?  @unique // Link to the original visitor record
   createdPlaces Place[]  @relation("CreatedPlaces")
   updatedPlaces Place[]  @relation("UpdatedPlaces")
   createdAt     DateTime @default(now())
@@ -284,4 +287,17 @@ model WebNavbar {
   iconColor   String?  @default("#FFB627")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+model Visitor {
+  id            String   @id @default(uuid())
+  fingerprint   String   @unique
+  username      String?  @unique // Format: EDN-XXXXX
+  lastIp        String?
+  userAgent     String?
+  lastVisitAt   DateTime @default(now())
+  visitCount    Int      @default(0)
+  customMessage String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }

@@ -14,6 +14,7 @@ import { FoodPlacesModule } from './food-places/food-places.module';
 import { SplashModule } from './splash/splash.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
 import { WebHomeModule } from './web-home/web-home.module';
+import { VisitorsModule } from './visitors/visitors.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { WebHomeModule } from './web-home/web-home.module';
     SplashModule,
     OnboardingModule,
     WebHomeModule,
+    VisitorsModule,
   ],
   controllers: [],
   providers: [],
