@@ -76,6 +76,11 @@ export class WebHomeController {
         return this.webHomeService.removeStoryAd(Number(id));
     }
 
+    @Post('ads/story/reorder')
+    reorderStoryAds(@Body() ids: number[]) {
+        return this.webHomeService.reorderStoryAds(ids);
+    }
+
     // --- FEATURED ADS ---
 
     @Get('ads/featured')
@@ -96,5 +101,10 @@ export class WebHomeController {
     @Delete('ads/featured/:id')
     removeFeaturedAd(@Param('id') id: string) {
         return this.webHomeService.removeFeaturedAd(Number(id));
+    }
+
+    @Post('ads/featured/reorder')
+    reorderFeaturedAds(@Body() ids: number[]) {
+        return this.webHomeService.reorderFeaturedAds(ids);
     }
 }

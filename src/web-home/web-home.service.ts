@@ -144,7 +144,6 @@ export class WebHomeService {
 
     async findAllStoryAds() {
         return this.prisma.storyAdvertisement.findMany({
-            where: { isActive: true },
             orderBy: { order: 'asc' }
         });
     }
@@ -174,11 +173,21 @@ export class WebHomeService {
         return this.prisma.storyAdvertisement.delete({ where: { id } });
     }
 
+    async reorderStoryAds(ids: number[]) {
+        return Promise.all(
+            ids.map((id, index) =>
+                this.prisma.storyAdvertisement.update({
+                    where: { id },
+                    data: { order: index + 1 }
+                })
+            )
+        );
+    }
+
     // --- FEATURED ADVERTISEMENTS ---
 
     async findAllFeaturedAds() {
         return this.prisma.featuredAdvertisement.findMany({
-            where: { isActive: true },
             orderBy: { order: 'asc' }
         });
     }
@@ -206,5 +215,16 @@ export class WebHomeService {
 
     async removeFeaturedAd(id: number) {
         return this.prisma.featuredAdvertisement.delete({ where: { id } });
+    }
+
+    async reorderFeaturedAds(ids: number[]) {
+        return Promise.all(
+            ids.map((id, index) =>
+                this.prisma.featuredAdvertisement.update({
+                    where: { id },
+                    data: { order: index + 1 }
+                })
+            )
+        );
     }
 }
