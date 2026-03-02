@@ -53,4 +53,48 @@ export class WebHomeController {
         console.log('Controller received body:', updateDto);
         return this.webHomeService.updateNavbar(updateDto, file);
     }
+
+    // --- STORY ADS ---
+
+    @Get('ads/story')
+    findAllStoryAds() {
+        return this.webHomeService.findAllStoryAds();
+    }
+
+    @Post('ads/story')
+    createStoryAd(@Body() dto: any) {
+        return this.webHomeService.createStoryAd(dto);
+    }
+
+    @Patch('ads/story/:id')
+    updateStoryAd(@Param('id') id: string, @Body() dto: any) {
+        return this.webHomeService.updateStoryAd(Number(id), dto);
+    }
+
+    @Delete('ads/story/:id')
+    removeStoryAd(@Param('id') id: string) {
+        return this.webHomeService.removeStoryAd(Number(id));
+    }
+
+    // --- FEATURED ADS ---
+
+    @Get('ads/featured')
+    findAllFeaturedAds() {
+        return this.webHomeService.findAllFeaturedAds();
+    }
+
+    @Post('ads/featured')
+    createFeaturedAd(@Body() dto: any) {
+        return this.webHomeService.createFeaturedAd(dto);
+    }
+
+    @Patch('ads/featured/:id')
+    updateFeaturedAd(@Param('id') id: string, @Body() dto: any) {
+        return this.webHomeService.updateFeaturedAd(Number(id), dto);
+    }
+
+    @Delete('ads/featured/:id')
+    removeFeaturedAd(@Param('id') id: string) {
+        return this.webHomeService.removeFeaturedAd(Number(id));
+    }
 }

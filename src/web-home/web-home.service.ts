@@ -139,4 +139,72 @@ export class WebHomeService {
             });
         }
     }
+
+    // --- STORY ADVERTISEMENTS ---
+
+    async findAllStoryAds() {
+        return this.prisma.storyAdvertisement.findMany({
+            where: { isActive: true },
+            orderBy: { order: 'asc' }
+        });
+    }
+
+    async createStoryAd(dto: any) {
+        return this.prisma.storyAdvertisement.create({
+            data: {
+                ...dto,
+                order: Number(dto.order || 0),
+                isNew: dto.isNew === 'true' || dto.isNew === true,
+            }
+        });
+    }
+
+    async updateStoryAd(id: number, dto: any) {
+        return this.prisma.storyAdvertisement.update({
+            where: { id },
+            data: {
+                ...dto,
+                order: dto.order ? Number(dto.order) : undefined,
+                isNew: dto.isNew !== undefined ? (dto.isNew === 'true' || dto.isNew === true) : undefined,
+            }
+        });
+    }
+
+    async removeStoryAd(id: number) {
+        return this.prisma.storyAdvertisement.delete({ where: { id } });
+    }
+
+    // --- FEATURED ADVERTISEMENTS ---
+
+    async findAllFeaturedAds() {
+        return this.prisma.featuredAdvertisement.findMany({
+            where: { isActive: true },
+            orderBy: { order: 'asc' }
+        });
+    }
+
+    async createFeaturedAd(dto: any) {
+        return this.prisma.featuredAdvertisement.create({
+            data: {
+                ...dto,
+                order: Number(dto.order || 0),
+                rating: dto.rating ? Number(dto.rating) : 0,
+            }
+        });
+    }
+
+    async updateFeaturedAd(id: number, dto: any) {
+        return this.prisma.featuredAdvertisement.update({
+            where: { id },
+            data: {
+                ...dto,
+                order: dto.order ? Number(dto.order) : undefined,
+                rating: dto.rating ? Number(dto.rating) : undefined,
+            }
+        });
+    }
+
+    async removeFeaturedAd(id: number) {
+        return this.prisma.featuredAdvertisement.delete({ where: { id } });
+    }
 }
