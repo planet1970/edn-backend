@@ -107,4 +107,22 @@ export class WebHomeController {
     reorderFeaturedAds(@Body() ids: number[]) {
         return this.webHomeService.reorderFeaturedAds(ids);
     }
+
+    // --- GOOGLE ADS ---
+
+    @Get('ads/google')
+    findAllGoogleAds() {
+        return this.webHomeService.findAllGoogleAds();
+    }
+
+    @Patch('ads/google/:areaName')
+    @UseInterceptors(FileInterceptor('file'))
+    updateGoogleAd(@Param('areaName') areaName: string, @Body() dto: any, @UploadedFile() file: Express.Multer.File) {
+        return this.webHomeService.updateGoogleAd(areaName, dto, file);
+    }
+
+    @Delete('ads/google/:areaName')
+    removeGoogleAd(@Param('areaName') areaName: string) {
+        return this.webHomeService.removeGoogleAd(areaName);
+    }
 }

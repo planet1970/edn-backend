@@ -322,6 +322,7 @@ model StoryAdvertisement {
 model FeaturedAdvertisement {
   id          Int      @id @default(autoincrement())
   title       String
+  mainCategory String?
   category    String?
   imageUrl    String?
   discount    String?
@@ -337,4 +338,16 @@ model FeaturedAdvertisement {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model WebGoogleAd {
+  id          Int      @id @default(autoincrement())
+  areaName    String   @unique // e.g., "SIDEBAR_LEFT", "SIDEBAR_RIGHT"
+  type        String   @default("SCRIPT") // "SCRIPT" or "IMAGE"
+  scriptCode  String?
+  imageUrl    String?
+  linkUrl     String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }

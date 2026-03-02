@@ -227,4 +227,68 @@ export class WebHomeService {
             )
         );
     }
+
+    // --- GOOGLE ADS ---
+
+    async findAllGoogleAds() {
+        return this.prisma.webGoogleAd.findMany();
+    }
+
+    async updateGoogleAd(areaName: string, dto: any, file?: Express.Multer.File) {
+        const existing = await this.prisma.webGoogleAd.findUnique({
+            where: { areaName }
+        });
+
+        let imageUrl = dto.imageUrl || existing?.imageUrl;
+
+        if (file) {
+            // Delete old image if exists
+            if (existing?.imageUrl) {
+                await this.uploadService.deleteFile(existing.imageUrl);
+            }
+            imageUrl = await this.uploadService.handleFile(file, 'ads');
+        }
+
+        // Handle case where user switches from IMAGE to SCRIPT
+        if (dto.type === 'SCRIPT' && existing?.imageUrl && !file) {
+            await this.uploadService.deleteFile(existing.imageUrl);
+            imageUrl = null;
+        }
+
+        const data: any = {
+            areaName,
+            type: dto.type,
+            scriptCode: dto.scriptCode !== undefined ? dto.scriptCode : existing?.scriptCode,
+            linkUrl: dto.linkUrl !== undefined ? dto.linkUrl : existing?.linkUrl,
+            isActive: dto.isActive !== undefined ? (dto.isActive === 'true' || dto.isActive === true) : (existing?.isActive ?? true),
+            imageUrl
+        };
+
+        if (existing) {
+            return this.prisma.webGoogleAd.update({
+                where: { areaName },
+                data
+            });
+        } else {
+            return this.prisma.webGoogleAd.create({
+                data
+            });
+        }
+    }
+
+    async removeGoogleAd(areaName: string) {
+        const existing = await this.prisma.webGoogleAd.findUnique({
+            where: { areaName }
+        });
+
+        if (existing?.imageUrl) {
+            await this.uploadService.deleteFile(existing.imageUrl);
+        }
+
+        if (existing) {
+            return this.prisma.webGoogleAd.delete({
+                where: { areaName }
+            });
+        }
+    }
 }
