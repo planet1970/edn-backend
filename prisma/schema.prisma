@@ -351,3 +351,31 @@ model WebGoogleAd {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
+
+model PopularPlaceAdvertisement {
+  id           Int      @id @default(autoincrement())
+  title        String
+  description  String?
+  imageUrl     String?
+  rating       Float?   @default(0)
+  visitCount   Int?     @default(0)
+  link         String?  @default("#")
+  badge        String?  // e.g., "UNESCO", "Tarihi"
+  hours        String?  // e.g., "09:00 - 18:00"
+  location     String?  // e.g., "Merkez", "Sarayiçi"
+  icon1        String?
+  info1        String?
+  icon2        String?
+  info2        String?
+  order        Int      @default(0)
+  isActive     Boolean  @default(true)
+  
+  // Generic relations back to source
+  sourceType   String?   // "PLACE" or "FOOD_PLACE"
+  sourceId     Int?
+  
+  mainCategory String?  // Category name for the badge
+  category     String?  // Subcategory name for the footer
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}

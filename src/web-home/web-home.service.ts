@@ -291,4 +291,50 @@ export class WebHomeService {
             });
         }
     }
+
+    // --- POPULAR PLACE ADVERTISEMENTS ---
+
+    async findAllPopularAds() {
+        return this.prisma.popularPlaceAdvertisement.findMany({
+            orderBy: { order: 'asc' }
+        });
+    }
+
+    async createPopularAd(dto: any) {
+        return this.prisma.popularPlaceAdvertisement.create({
+            data: {
+                ...dto,
+                order: Number(dto.order || 0),
+                rating: dto.rating ? Number(dto.rating) : 0,
+                visitCount: dto.visitCount ? Number(dto.visitCount) : 0,
+            }
+        });
+    }
+
+    async updatePopularAd(id: number, dto: any) {
+        return this.prisma.popularPlaceAdvertisement.update({
+            where: { id },
+            data: {
+                ...dto,
+                order: dto.order ? Number(dto.order) : undefined,
+                rating: dto.rating ? Number(dto.rating) : undefined,
+                visitCount: dto.visitCount ? Number(dto.visitCount) : undefined,
+            }
+        });
+    }
+
+    async removePopularAd(id: number) {
+        return this.prisma.popularPlaceAdvertisement.delete({ where: { id } });
+    }
+
+    async reorderPopularAds(ids: number[]) {
+        return Promise.all(
+            ids.map((id, index) =>
+                this.prisma.popularPlaceAdvertisement.update({
+                    where: { id },
+                    data: { order: index + 1 }
+                })
+            )
+        );
+    }
 }

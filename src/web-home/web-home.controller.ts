@@ -125,4 +125,31 @@ export class WebHomeController {
     removeGoogleAd(@Param('areaName') areaName: string) {
         return this.webHomeService.removeGoogleAd(areaName);
     }
+
+    // --- POPULAR ADS ---
+
+    @Get('ads/popular')
+    findAllPopularAds() {
+        return this.webHomeService.findAllPopularAds();
+    }
+
+    @Post('ads/popular')
+    createPopularAd(@Body() dto: any) {
+        return this.webHomeService.createPopularAd(dto);
+    }
+
+    @Patch('ads/popular/:id')
+    updatePopularAd(@Param('id') id: string, @Body() dto: any) {
+        return this.webHomeService.updatePopularAd(Number(id), dto);
+    }
+
+    @Delete('ads/popular/:id')
+    removePopularAd(@Param('id') id: string) {
+        return this.webHomeService.removePopularAd(Number(id));
+    }
+
+    @Post('ads/popular/reorder')
+    reorderPopularAds(@Body() ids: number[]) {
+        return this.webHomeService.reorderPopularAds(ids);
+    }
 }
