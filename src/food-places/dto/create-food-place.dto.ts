@@ -44,7 +44,7 @@ export class CreateFoodPlaceDto {
 
     @IsOptional()
     @IsString()
-    frontContent?: string;
+    description?: string;
 
     @IsOptional()
     @IsString()

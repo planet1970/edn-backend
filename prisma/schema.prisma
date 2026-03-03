@@ -172,7 +172,7 @@ model FoodPlace {
   badge         String?
   rating        Float?
   storyTitle    String?
-  frontContent  String?
+  description   String?
   backContent   String?
   phone         String?
   hoursEveryday String?
