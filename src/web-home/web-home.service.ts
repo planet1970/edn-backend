@@ -337,4 +337,82 @@ export class WebHomeService {
             )
         );
     }
+
+    // --- ABOUT SECTION ---
+
+    async getAboutSection() {
+        let section = await this.prisma.webAboutSection.findFirst({
+            include: { cards: { orderBy: { order: 'asc' } } }
+        });
+
+        if (!section) {
+            // Create default if not exists
+            section = await this.prisma.webAboutSection.create({
+                data: {
+                    title: "HADRİANOUPOLİS'TEN EDİRNE'YE",
+                    description: "İlginç Bilgiler"
+                },
+                include: { cards: true }
+            });
+        }
+        return section;
+    }
+
+    async updateAboutSection(dto: any) {
+        const existing = await this.prisma.webAboutSection.findFirst();
+        if (existing) {
+            return this.prisma.webAboutSection.update({
+                where: { id: existing.id },
+                data: {
+                    title: dto.title,
+                    description: dto.description
+                }
+            });
+        } else {
+            return this.prisma.webAboutSection.create({
+                data: {
+                    title: dto.title,
+                    description: dto.description
+                }
+            });
+        }
+    }
+
+    async createAboutCard(dto: any) {
+        const section = await this.getAboutSection();
+        return this.prisma.webAboutCard.create({
+            data: {
+                ...dto,
+                sectionId: section.id,
+                order: Number(dto.order || 0),
+                isActive: dto.isActive === 'true' || dto.isActive === true
+            }
+        });
+    }
+
+    async updateAboutCard(id: number, dto: any) {
+        return this.prisma.webAboutCard.update({
+            where: { id },
+            data: {
+                ...dto,
+                order: dto.order ? Number(dto.order) : undefined,
+                isActive: dto.isActive !== undefined ? (dto.isActive === 'true' || dto.isActive === true) : undefined
+            }
+        });
+    }
+
+    async removeAboutCard(id: number) {
+        return this.prisma.webAboutCard.delete({ where: { id } });
+    }
+
+    async reorderAboutCards(ids: number[]) {
+        return Promise.all(
+            ids.map((id, index) =>
+                this.prisma.webAboutCard.update({
+                    where: { id },
+                    data: { order: index + 1 }
+                })
+            )
+        );
+    }
 }

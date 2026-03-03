@@ -152,4 +152,36 @@ export class WebHomeController {
     reorderPopularAds(@Body() ids: number[]) {
         return this.webHomeService.reorderPopularAds(ids);
     }
+
+    // --- ABOUT SECTION ---
+
+    @Get('about')
+    getAboutSection() {
+        return this.webHomeService.getAboutSection();
+    }
+
+    @Post('about')
+    updateAboutSection(@Body() dto: any) {
+        return this.webHomeService.updateAboutSection(dto);
+    }
+
+    @Post('about/cards')
+    createAboutCard(@Body() dto: any) {
+        return this.webHomeService.createAboutCard(dto);
+    }
+
+    @Patch('about/cards/:id')
+    updateAboutCard(@Param('id') id: string, @Body() dto: any) {
+        return this.webHomeService.updateAboutCard(Number(id), dto);
+    }
+
+    @Delete('about/cards/:id')
+    removeAboutCard(@Param('id') id: string) {
+        return this.webHomeService.removeAboutCard(Number(id));
+    }
+
+    @Post('about/cards/reorder')
+    reorderAboutCards(@Body() ids: number[]) {
+        return this.webHomeService.reorderAboutCards(ids);
+    }
 }
