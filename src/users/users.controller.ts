@@ -9,7 +9,7 @@ import { Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { RoleGuard } from '../auth/guards/role.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { Role } from '@prisma/client';
+// Roles are passed as strings now
 
 @ApiTags('Users')
 @Controller('users')
@@ -18,7 +18,7 @@ export class UsersController {
 
     @Get()
     @UseGuards(AuthGuard('jwt'), RoleGuard)
-    @Roles(Role.ADMIN)
+    @Roles('ADMIN')
     @ApiBearerAuth()
     @ApiOperation({ summary: 'Tüm kullanıcıları listele (Admin)' })
     async findAll() {
@@ -27,7 +27,7 @@ export class UsersController {
 
     @Delete(':id')
     @UseGuards(AuthGuard('jwt'), RoleGuard)
-    @Roles(Role.ADMIN)
+    @Roles('ADMIN')
     @ApiBearerAuth()
     @ApiOperation({ summary: 'Kullanıcı sil (Admin)' })
     async remove(@Param('id', ParseIntPipe) id: number) {
@@ -36,7 +36,7 @@ export class UsersController {
 
     @Patch(':id')
     @UseGuards(AuthGuard('jwt'), RoleGuard)
-    @Roles(Role.ADMIN)
+    @Roles('ADMIN')
     @ApiBearerAuth()
     @ApiOperation({ summary: 'Kullanıcı güncelle (Admin)' })
     async update(@Param('id', ParseIntPipe) id: number, @Body() body: any) {
@@ -81,5 +81,29 @@ export class UsersController {
         await this.usersService.update(userId, { imageUrl });
 
         return res.status(HttpStatus.OK).json({ imageUrl });
+    }
+
+    // UserType Endpoints
+    @Get('types')
+    @UseGuards(AuthGuard('jwt'))
+    @ApiBearerAuth()
+    async findAllTypes() {
+        return this.usersService.findAllTypes();
+    }
+
+    @Post('types')
+    @UseGuards(AuthGuard('jwt'), RoleGuard)
+    @Roles('ADMIN')
+    @ApiBearerAuth()
+    async createType(@Body() body: any) {
+        return this.usersService.createType(body);
+    }
+
+    @Delete('types/:id')
+    @UseGuards(AuthGuard('jwt'), RoleGuard)
+    @Roles('ADMIN')
+    @ApiBearerAuth()
+    async removeType(@Param('id') id: string) {
+        return this.usersService.removeType(id);
     }
 }

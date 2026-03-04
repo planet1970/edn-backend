@@ -7,6 +7,12 @@ import * as bcrypt from 'bcrypt';
 export class VisitorsService {
     constructor(private prisma: PrismaService) { }
 
+    async findAll() {
+        return this.prisma.visitor.findMany({
+            orderBy: { lastVisitAt: 'desc' },
+        });
+    }
+
     async trackVisitor(fingerprint: string, ip?: string, userAgent?: string) {
         let visitor = await this.prisma.visitor.findUnique({
             where: { fingerprint },
@@ -169,8 +175,9 @@ export class VisitorsService {
                     imageUrl: data.imageUrl,
                     isEdirnelim: isEdirnelim,
                     visitorId: data.visitorId,
-                    role: 'VIEWER'
-                }
+                    roleId: 'USER',
+                    isActive: true
+                } as any
             });
 
             // Update visitor record to match User identity

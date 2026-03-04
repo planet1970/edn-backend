@@ -63,7 +63,7 @@ export class PlacesService {
                             email: 'admin@example.com',
                             password: 'hashed_password_placeholder',
                             name: 'Admin',
-                            role: 'ADMIN'
+                            roleId: 'ADMIN'
                         }
                     });
                 } catch (e) {

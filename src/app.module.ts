@@ -16,6 +16,9 @@ import { OnboardingModule } from './onboarding/onboarding.module';
 import { WebHomeModule } from './web-home/web-home.module';
 import { VisitorsModule } from './visitors/visitors.module';
 
+import { ContactMessagesModule } from './contact-messages/contact-messages.module';
+import { StatsModule } from './stats/stats.module';
+
 @Module({
   imports: [
     ConfigModule.forRoot({
@@ -36,6 +39,8 @@ import { VisitorsModule } from './visitors/visitors.module';
     OnboardingModule,
     WebHomeModule,
     VisitorsModule,
+    ContactMessagesModule,
+    StatsModule,
   ],
   controllers: [],
   providers: [],

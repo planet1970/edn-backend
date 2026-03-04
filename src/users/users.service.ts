@@ -14,7 +14,11 @@ export class UsersService {
 
   async create(data: Prisma.UserCreateInput): Promise<User> {
     return (this.prisma as any).user.create({
-      data,
+      data: {
+        ...data,
+        roleId: (data as any).roleId || 'USER',
+        isActive: (data as any).isActive ?? true,
+      } as any,
     });
   }
 
@@ -25,14 +29,53 @@ export class UsersService {
     });
   }
 
-  async findAll(): Promise<User[]> {
-    return (this.prisma as any).user.findMany({
+  async findAll(): Promise<any[]> {
+    const users = await (this.prisma as any).user.findMany({
       orderBy: { createdAt: 'desc' },
+      include: {
+        role: true,
+        visitor: true
+      }
+    });
+    return users.map((user: any) => {
+      const mapped = {
+        ...user,
+        fullName: user.name || '',
+        name: user.name || '',
+        roleId: user.roleId,
+        roleName: user.role?.title || user.roleId,
+        visitCount: user.visitor?.visitCount || 0,
+        lastVisitAt: user.visitor?.lastVisitAt || null,
+        fingerprint: user.visitorId,
+        ip: user.visitor?.lastIp || '',
+      };
+      return mapped;
     });
   }
 
   async remove(id: number): Promise<User> {
     return (this.prisma as any).user.delete({
+      where: { id },
+    });
+  }
+
+  // UserType methods
+  async findAllTypes() {
+    return (this.prisma as any).userType.findMany({
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async createType(data: { id: string, title: string, description?: string, isSystem?: boolean }) {
+    return (this.prisma as any).userType.upsert({
+      where: { id: data.id || `role_${Date.now()}` },
+      update: data,
+      create: data,
+    });
+  }
+
+  async removeType(id: string) {
+    return (this.prisma as any).userType.delete({
       where: { id },
     });
   }

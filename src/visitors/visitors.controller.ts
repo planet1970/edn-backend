@@ -1,46 +1,49 @@
-import { Controller, Post, Get, Body, Param, Req, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Controller, Get, Post, Body, Req, Ip, UseGuards, Param } from '@nestjs/common';
 import { VisitorsService } from './visitors.service';
-import { Request } from 'express';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { UploadService } from '../common/upload/upload.service';
+import { AuthGuard } from '@nestjs/passport';
 
 @Controller('visitors')
 export class VisitorsController {
-    constructor(
-        private readonly visitorsService: VisitorsService,
-        private readonly uploadService: UploadService
-    ) { }
+    constructor(private readonly visitorsService: VisitorsService) { }
+
+    @Get('test')
+    test() {
+        return { message: 'Visitors controller is active' };
+    }
 
     @Post('track')
-    async track(@Body() body: { fingerprint: string }, @Req() req: Request) {
-        const ip = req.ip;
+    async trackVisitor(
+        @Body() body: { fingerprint: string },
+        @Ip() ip: string,
+        @Req() req: any
+    ) {
         const userAgent = req.headers['user-agent'];
         return this.visitorsService.trackVisitor(body.fingerprint, ip, userAgent);
     }
 
-    @Post('upgrade')
-    @UseInterceptors(FileInterceptor('file'))
-    async upgrade(
-        @UploadedFile() file: Express.Multer.File,
-        @Body() body: any
-    ) {
-        let imageUrl = undefined;
-        if (file) {
-            imageUrl = await this.uploadService.handleFile(file, 'profiles');
-        }
-        return this.visitorsService.upgradeToUser({
-            ...body,
-            imageUrl
-        });
+    @Get(':fingerprint')
+    async getVisitor(@Param('fingerprint') fingerprint: string) {
+        return this.visitorsService.getVisitor(fingerprint);
     }
 
     @Post('login')
-    async login(@Body() body: { email: string, password: string, visitorId: string }) {
+    async loginUser(@Body() body: any) {
         return this.visitorsService.loginUser(body);
     }
 
-    @Get(':fingerprint')
-    async get(@Param('fingerprint') fingerprint: string) {
-        return this.visitorsService.getVisitor(fingerprint);
+    @Post('upgrade')
+    async upgradeToUser(@Body() body: any) {
+        return this.visitorsService.upgradeToUser(body);
+    }
+
+    @Post('message')
+    async setCustomMessage(@Body() body: { fingerprint: string, message: string }) {
+        return this.visitorsService.setCustomMessage(body.fingerprint, body.message);
+    }
+
+    @UseGuards(AuthGuard('jwt'))
+    @Get()
+    findAll() {
+        return this.visitorsService.findAll();
     }
 }

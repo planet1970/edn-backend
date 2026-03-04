@@ -4,8 +4,8 @@ import { Transform } from 'class-transformer';
 
 export enum UserRole {
   ADMIN = 'ADMIN',
-  EXAM_OFFICER = 'EXAM_OFFICER',
-  VIEWER = 'VIEWER',
+  USER = 'USER',
+  CUSTOMER = 'CUSTOMER',
 }
 
 export class RegisterDto {
@@ -24,9 +24,9 @@ export class RegisterDto {
   @IsString()
   @IsOptional()
   name?: string;
-  
+
   // Güvenlik gereği rolu client'tan direkt almayabiliriz ama şimdilik ekliyoruz
-  @ApiProperty({ enum: UserRole, example: UserRole.VIEWER, required: false })
+  @ApiProperty({ enum: UserRole, example: UserRole.USER, required: false })
   @IsEnum(UserRole)
   @IsOptional()
   role?: UserRole;

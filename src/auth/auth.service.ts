@@ -24,8 +24,9 @@ export class AuthService {
     const user = await this.usersService.create({
       ...registerDto,
       password: hashedPassword,
-      role: registerDto.role as any || 'VIEWER',
-    });
+      roleId: 'USER',
+      isActive: true,
+    } as any);
 
     const { password, ...result } = user;
     return result;
@@ -42,14 +43,14 @@ export class AuthService {
       throw new UnauthorizedException('E-posta veya şifre hatalı.');
     }
 
-    const payload = { sub: user.id, email: user.email, role: user.role };
+    const payload = { sub: user.id, email: user.email, role: user.roleId };
     return {
       access_token: this.jwtService.sign(payload),
       user: {
         id: user.id,
         email: user.email,
         name: user.name,
-        role: user.role,
+        role: user.roleId,
       }
     };
   }
@@ -67,18 +68,19 @@ export class AuthService {
         name: payload.name,
         password: null,
         googleId: payload.googleId,
-        role: 'VIEWER' as any,
-      });
+        roleId: 'USER',
+        isActive: true,
+      } as any);
     }
 
-    const tokenPayload = { sub: user.id, email: user.email, role: user.role };
+    const tokenPayload = { sub: user.id, email: user.email, role: user.roleId };
     return {
       access_token: this.jwtService.sign(tokenPayload),
       user: {
         id: user.id,
         email: user.email,
         name: user.name,
-        role: user.role,
+        role: user.roleId,
       }
     };
   }

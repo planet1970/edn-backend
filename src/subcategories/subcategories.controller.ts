@@ -6,7 +6,7 @@ import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { RoleGuard } from 'src/auth/guards/role.guard';
 import { Roles } from 'src/auth/decorators/roles.decorator';
-import { Role } from '@prisma/client';
+// Role enum is removed
 import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UploadService } from 'src/common/upload/upload.service';
@@ -23,7 +23,7 @@ export class SubcategoriesController {
 
     @Post()
     @UseGuards(AuthGuard("jwt"), RoleGuard)
-    @Roles(Role.ADMIN, Role.EXAM_OFFICER)
+    @Roles('ADMIN')
     @UseInterceptors(
         FileInterceptor("file", {
             storage: multerStorage,
@@ -70,7 +70,7 @@ export class SubcategoriesController {
 
     @Patch(":id")
     @UseGuards(AuthGuard("jwt"), RoleGuard)
-    @Roles(Role.ADMIN, Role.EXAM_OFFICER)
+    @Roles('ADMIN')
     @UseInterceptors(
         FileInterceptor("file", {
             storage: multerStorage,
@@ -106,7 +106,7 @@ export class SubcategoriesController {
 
     @Delete(":id")
     @UseGuards(AuthGuard("jwt"), RoleGuard)
-    @Roles(Role.ADMIN, Role.EXAM_OFFICER)
+    @Roles('ADMIN')
     async remove(@Param("id") id: string) {
         return this.subcategoriesService.remove(+id);
     }
