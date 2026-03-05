@@ -28,6 +28,9 @@ model User {
   updatedPlaces     Place[]          @relation("UpdatedPlaces")
   completedMessages ContactMessage[] @relation("CompletedMessages")
   pageAuthorities  PageAuthority[]
+  tempPlacesUpdated TempPlace[]     @relation("TempPlaceUpdatedBy")
+  tempPlacesCreated TempPlace[]     @relation("TempPlaceCreatedBy")
+  tempFoodPlaces    TempFoodPlace[] @relation("TempFoodPlaceUpdatedBy")
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 }
@@ -274,16 +277,17 @@ model WebHeroSlide {
 }
 
 model WebSocialInfo {
-  id        Int      @id @default(autoincrement())
-  phone     String?
-  email     String?
-  address   String?
-  facebook  String?
-  instagram String?
-  twitter   String?
-  youtube   String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           Int      @id @default(autoincrement())
+  phone        String?
+  email        String?
+  address      String?
+  workingHours String?
+  facebook     String?
+  instagram    String?
+  twitter      String?
+  youtube      String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model WebNavbar {
@@ -437,4 +441,133 @@ model PageAuthority {
   updatedAt  DateTime @updatedAt
 
   @@unique([userId, sourceType, sourceId])
+}
+
+model TempPlace {
+  id              Int      @id @default(autoincrement())
+  originalId      Int? // ID of the original Place record
+  title           String
+  slug            String?
+  pic_url         String?
+  back_pic_url    String?
+  icon1           String?
+  title1          String?
+  info1           String?
+  icon2           String?
+  title2          String?
+  info2           String?
+  icon3           String?
+  title3          String?
+  info3           String?
+  icon4           String?
+  title4          String?
+  info4           String?
+  description     String?
+  rating          Float?
+  panel1_title    String?
+  panel1          String?
+  panel2_title    String?
+  panel2          String?
+  panel_col_title String?
+  panel_col       String?
+  panel3_title    String?
+  panel3          String?
+  panel4_title    String?
+  panel4          String?
+  panel_col_title2 String?
+  panel_col2       String?
+  panel5_title     String?
+  area1           String?
+  area2           String?
+  area3           String?
+  area4           String?
+  area5           String?
+  area6           String?
+  area7           String?
+  area8           String?
+  area9           String?
+  area10          String?
+  source          String?
+  order           Int      @default(0)
+  categoryId      Int?
+  subCategoryId   Int?
+  isActive        Boolean  @default(true)
+  updatedBy       User?    @relation("TempPlaceUpdatedBy", fields: [updatedById], references: [id])
+  updatedById     Int?
+  createdBy       User?    @relation("TempPlaceCreatedBy", fields: [createdById], references: [id])
+  createdById     Int?
+  status          String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model TempFoodPlace {
+  id            Int      @id @default(autoincrement())
+  originalId    Int? // ID of the original FoodPlace record
+  title         String
+  slug          String?
+  subtitle      String?
+  mainColor     String?
+  imageUrl      String?
+  backImageUrl  String?
+  campaignUrl   String?
+  badge         String?
+  rating        Float?
+  storyTitle    String?
+  description   String?
+  backContent   String?
+  phone         String?
+  hoursEveryday String?
+  hoursMon      String?
+  hoursTue      String?
+  hoursWed      String?
+  hoursThu      String?
+  hoursFri      String?
+  hoursSat      String?
+  hoursSun      String?
+  menuItem1     String?
+  menuDesc1     String?
+  menuPrice1    String?
+  menuItem2     String?
+  menuDesc2     String?
+  menuPrice2    String?
+  menuItem3     String?
+  menuDesc3     String?
+  menuPrice3    String?
+  menuItem4     String?
+  menuDesc4     String?
+  menuPrice4    String?
+  menuItem5     String?
+  menuDesc5     String?
+  menuPrice5    String?
+  menuItem6     String?
+  menuDesc6     String?
+  menuPrice6    String?
+  menuItem7     String?
+  menuDesc7     String?
+  menuPrice7    String?
+  menuItem8     String?
+  menuDesc8     String?
+  menuPrice8    String?
+  menuItem9     String?
+  menuDesc9     String?
+  menuPrice9    String?
+  menuItem10    String?
+  menuDesc10    String?
+  menuPrice10   String?
+  features      String?
+  address       String?
+  website       String?
+  field1        String?
+  field2        String?
+  field3        String?
+  field4        String?
+  field5        String?
+  isActive      Boolean  @default(true)
+  subCategoryId Int
+  updatedBy     User?    @relation("TempFoodPlaceUpdatedBy", fields: [updatedById], references: [id])
+  updatedById   Int?
+  status        String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }

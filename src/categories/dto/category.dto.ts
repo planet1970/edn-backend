@@ -1,5 +1,6 @@
-import { IsInt, IsNotEmpty, IsOptional, IsString, Min } from 'class-validator';
+import { IsInt, IsNotEmpty, IsOptional, IsString, Min, IsBoolean } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { Transform } from 'class-transformer';
 
 export class CreateCategoryDto {
   @ApiProperty({ example: 'Gezilecek Yerler' })
@@ -30,6 +31,12 @@ export class CreateCategoryDto {
 
   @ApiProperty({ example: true, required: false })
   @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => {
+    if (value === 'true' || value === true) return true;
+    if (value === 'false' || value === false) return false;
+    return value;
+  })
   isActive?: boolean;
 }
 
@@ -62,5 +69,11 @@ export class UpdateCategoryDto {
 
   @ApiProperty({ example: true, required: false })
   @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => {
+    if (value === 'true' || value === true) return true;
+    if (value === 'false' || value === false) return false;
+    return value;
+  })
   isActive?: boolean;
 }

@@ -79,25 +79,48 @@ export class PageAuthoritiesService {
             }
         });
 
-        // Group by user and include page names
-        // This is a bit complex since sourceType+sourceId needs to fetch from 2 tables
         const results = [];
         for (const auth of authorities) {
             let pageTitle = 'Bilinmeyen Sayfa';
+            let categoryId = null;
+            let subCategoryId = null;
+
             if (auth.sourceType === 'PLACE') {
-                const p = await this.prisma.place.findUnique({ where: { id: auth.sourceId }, select: { title: true } });
-                if (p) pageTitle = p.title;
+                const p = await this.prisma.place.findUnique({
+                    where: { id: auth.sourceId },
+                    select: { title: true, categoryId: true, subCategoryId: true }
+                });
+                if (p) {
+                    pageTitle = p.title;
+                    categoryId = p.categoryId;
+                    subCategoryId = p.subCategoryId;
+                }
             } else if (auth.sourceType === 'FOOD_PLACE') {
-                const f = await this.prisma.foodPlace.findUnique({ where: { id: auth.sourceId }, select: { title: true } });
-                if (f) pageTitle = f.title;
+                const f = await this.prisma.foodPlace.findUnique({
+                    where: { id: auth.sourceId },
+                    select: { title: true, subCategoryId: true }
+                });
+                if (f) {
+                    pageTitle = f.title;
+                    subCategoryId = f.subCategoryId;
+                    // For food places, we might need to find the category from subcategory
+                    const sub = await this.prisma.subCategory.findUnique({
+                        where: { id: f.subCategoryId },
+                        select: { categoryId: true }
+                    });
+                    if (sub) categoryId = sub.categoryId;
+                }
             }
 
             results.push({
+                id: auth.id,
                 userId: auth.userId,
                 userName: auth.user.name || auth.user.email,
                 pageId: auth.sourceId,
                 pageType: auth.sourceType,
-                pageTitle: pageTitle
+                pageTitle: pageTitle,
+                categoryId: categoryId,
+                subCategoryId: subCategoryId
             });
         }
         return results;

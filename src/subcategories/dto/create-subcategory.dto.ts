@@ -1,5 +1,5 @@
-import { IsString, IsOptional, IsNumber, IsNotEmpty } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsString, IsOptional, IsNumber, IsNotEmpty, IsBoolean } from 'class-validator';
+import { Type, Transform } from 'class-transformer';
 
 export class CreateSubcategoryDto {
     @IsNotEmpty()
@@ -29,5 +29,11 @@ export class CreateSubcategoryDto {
     categoryId: number;
 
     @IsOptional()
+    @IsBoolean()
+    @Transform(({ value }) => {
+        if (value === 'true' || value === true) return true;
+        if (value === 'false' || value === false) return false;
+        return value;
+    })
     isActive?: boolean;
 }

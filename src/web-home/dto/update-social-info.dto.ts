@@ -15,6 +15,10 @@ export class UpdateSocialInfoDto {
 
     @IsString()
     @IsOptional()
+    workingHours?: string;
+
+    @IsString()
+    @IsOptional()
     facebook?: string;
 
     @IsString()
