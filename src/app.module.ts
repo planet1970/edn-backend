@@ -18,6 +18,7 @@ import { VisitorsModule } from './visitors/visitors.module';
 
 import { ContactMessagesModule } from './contact-messages/contact-messages.module';
 import { StatsModule } from './stats/stats.module';
+import { PageAuthoritiesModule } from './page-authorities/page-authorities.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { StatsModule } from './stats/stats.module';
     VisitorsModule,
     ContactMessagesModule,
     StatsModule,
+    PageAuthoritiesModule,
   ],
   controllers: [],
   providers: [],
