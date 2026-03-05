@@ -126,6 +126,40 @@ export class WebHomeController {
         return this.webHomeService.removeGoogleAd(areaName);
     }
 
+    // --- POPUP ADS ---
+
+    @Get('ads/popup')
+    getPopupAds() {
+        return this.webHomeService.getPopupAds();
+    }
+
+    @Get('ads/popup/active')
+    getActivePopupAd() {
+        return this.webHomeService.getActivePopupAd();
+    }
+
+    @Post('ads/popup')
+    @UseInterceptors(FileInterceptor('file'))
+    createPopupAd(@Body() dto: any, @UploadedFile() file: Express.Multer.File) {
+        return this.webHomeService.createPopupAd(dto, file);
+    }
+
+    @Patch('ads/popup/:id')
+    @UseInterceptors(FileInterceptor('file'))
+    updatePopupAd(@Param('id') id: string, @Body() dto: any, @UploadedFile() file: Express.Multer.File) {
+        return this.webHomeService.updatePopupAd(Number(id), dto, file);
+    }
+
+    @Delete('ads/popup/:id')
+    removePopupAd(@Param('id') id: string) {
+        return this.webHomeService.removePopupAd(Number(id));
+    }
+
+    @Patch('ads/popup/:id/view')
+    incrementPopupView(@Param('id') id: string) {
+        return this.webHomeService.incrementPopupView(Number(id));
+    }
+
     // --- POPULAR ADS ---
 
     @Get('ads/popular')

@@ -415,4 +415,95 @@ export class WebHomeService {
             )
         );
     }
+    // --- POPUP ADS ---
+
+    async getPopupAds() {
+        return this.prisma.webPopupAd.findMany({
+            orderBy: { createdAt: 'desc' }
+        });
+    }
+
+    async getActivePopupAd() {
+        return this.prisma.webPopupAd.findFirst({
+            where: { isActive: true },
+            orderBy: { createdAt: 'desc' }
+        });
+    }
+
+    async createPopupAd(dto: any, file?: Express.Multer.File) {
+        let imageUrl = dto.imageUrl;
+        if (file) {
+            imageUrl = await this.uploadService.handleFile(file, 'ads');
+        }
+
+        const isActive = dto.isActive === 'true' || dto.isActive === true;
+
+        if (isActive) {
+            await this.prisma.webPopupAd.updateMany({
+                where: { isActive: true },
+                data: { isActive: false }
+            });
+        }
+
+        return this.prisma.webPopupAd.create({
+            data: {
+                title: dto.title,
+                imageUrl,
+                linkUrl: dto.linkUrl,
+                isActive
+            }
+        });
+    }
+
+    async incrementPopupView(id: number) {
+        return this.prisma.webPopupAd.update({
+            where: { id },
+            data: {
+                viewCount: {
+                    increment: 1
+                }
+            }
+        });
+    }
+
+    async updatePopupAd(id: number, dto: any, file?: Express.Multer.File) {
+        const existing = await this.prisma.webPopupAd.findUnique({ where: { id } });
+        if (!existing) throw new NotFoundException('Popup ad not found');
+
+        let imageUrl = dto.imageUrl || existing.imageUrl;
+        if (file) {
+            imageUrl = await this.uploadService.handleFile(file, 'ads');
+        }
+
+        const isActive = dto.isActive !== undefined ? (dto.isActive === 'true' || dto.isActive === true) : existing.isActive;
+
+        if (isActive && !existing.isActive) {
+            await this.prisma.webPopupAd.updateMany({
+                where: { isActive: true, id: { not: id } },
+                data: { isActive: false }
+            });
+        }
+
+        return this.prisma.webPopupAd.update({
+            where: { id },
+            data: {
+                title: dto.title !== undefined ? dto.title : existing.title,
+                imageUrl,
+                linkUrl: dto.linkUrl !== undefined ? dto.linkUrl : existing.linkUrl,
+                isActive
+            }
+        });
+    }
+
+    async removePopupAd(id: number) {
+        const existing = await this.prisma.webPopupAd.findUnique({ where: { id } });
+        if (existing?.imageUrl) {
+            try {
+                await this.uploadService.deleteFile(existing.imageUrl);
+            } catch (e) {
+                console.error("Could not delete file:", e);
+            }
+        }
+        return this.prisma.webPopupAd.delete({ where: { id } });
+    }
 }
