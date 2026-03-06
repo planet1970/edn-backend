@@ -20,9 +20,11 @@ import { ContactMessagesModule } from './contact-messages/contact-messages.modul
 import { StatsModule } from './stats/stats.module';
 import { PageAuthoritiesModule } from './page-authorities/page-authorities.module';
 import { TempPagesModule } from './temp-pages/temp-pages.module';
+import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     ConfigModule.forRoot({
       isGlobal: true,
     }),

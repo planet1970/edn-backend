@@ -1,10 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Prisma, User } from '@prisma/client';
+import { UploadService } from '../common/upload/upload.service';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) { }
+  constructor(
+    private prisma: PrismaService,
+    private readonly uploadService: UploadService,
+  ) { }
 
   async findOne(email: string): Promise<User | null> {
     return (this.prisma as any).user.findUnique({
@@ -23,6 +27,13 @@ export class UsersService {
   }
 
   async update(id: number, data: Prisma.UserUpdateInput): Promise<User> {
+    // Fetch old record for image deletion
+    const oldRecord = await (this.prisma as any).user.findUnique({ where: { id } });
+
+    if (data.imageUrl && oldRecord?.imageUrl && data.imageUrl !== oldRecord.imageUrl) {
+      await this.uploadService.deleteFile(oldRecord.imageUrl);
+    }
+
     return (this.prisma as any).user.update({
       where: { id },
       data,

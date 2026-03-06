@@ -1,4 +1,5 @@
-import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateWebHeroDto } from './dto/create-web-hero.dto';
 import { UpdateWebHeroDto } from './dto/update-web-hero.dto';
@@ -12,6 +13,70 @@ export class WebHomeService {
         private prisma: PrismaService,
         private readonly uploadService: UploadService,
     ) { }
+
+    @Cron(CronExpression.EVERY_MINUTE)
+    async syncPopupAdStatuses() {
+        const now = new Date();
+
+        // 1. Deactivate ads that have expired
+        await this.prisma.webPopupAd.updateMany({
+            where: {
+                isActive: true,
+                endDate: { lt: now }
+            },
+            data: { isActive: false }
+        });
+
+        // 2. Handle scheduled activation and "active ad deactivation"
+        // Find ads that are currently valid (started and not expired)
+        const validAds = await this.prisma.webPopupAd.findMany({
+            where: {
+                isActive: true,
+                OR: [
+                    { startDate: null },
+                    { startDate: { lte: now } }
+                ],
+                AND: [
+                    {
+                        OR: [
+                            { endDate: null },
+                            { endDate: { gte: now } }
+                        ]
+                    }
+                ]
+            }
+        });
+
+        if (validAds.length > 0) {
+            const bestAd = validAds.sort((a, b) => {
+                if (a.isDefault && !b.isDefault) return 1;
+                if (!a.isDefault && b.isDefault) return -1;
+                if (a.startDate && !b.startDate) return -1;
+                if (!a.startDate && b.startDate) return 1;
+                if (a.startDate && b.startDate) return b.startDate.getTime() - a.startDate.getTime();
+                return b.id - a.id;
+            })[0];
+
+            // If the best ad is NOT the default one, and we have multiple active, 
+            // we should deactivate other non-default ads that are currently valid.
+            // If the best ad IS the default one, we don't need to deactivate others 
+            // because they are either not valid yet or deactivated.
+            if (!bestAd.isDefault) {
+                await this.prisma.webPopupAd.updateMany({
+                    where: {
+                        id: { not: bestAd.id },
+                        isActive: true,
+                        isDefault: false,
+                        OR: [
+                            { startDate: null },
+                            { startDate: { lte: now } }
+                        ]
+                    },
+                    data: { isActive: false }
+                });
+            }
+        }
+    }
 
     // --- HERO SLIDES ---
 
@@ -49,6 +114,9 @@ export class WebHomeService {
         let imageUrl = updateDto.imageUrl || slide.imageUrl;
 
         if (file) {
+            if (slide.imageUrl) {
+                await this.uploadService.deleteFile(slide.imageUrl);
+            }
             imageUrl = await this.uploadService.handleFile(file, 'hero');
         }
 
@@ -107,6 +175,9 @@ export class WebHomeService {
         let logoUrl = updateDto.logoUrl;
 
         if (file) {
+            if (existing?.logoUrl) {
+                await this.uploadService.deleteFile(existing.logoUrl);
+            }
             logoUrl = await this.uploadService.handleFile(file, 'logo');
         }
 
@@ -159,6 +230,13 @@ export class WebHomeService {
     }
 
     async updateStoryAd(id: number, dto: any) {
+        // Fetch old record for image deletion
+        const oldRecord = await this.prisma.storyAdvertisement.findUnique({ where: { id } });
+
+        if (dto.imageUrl && oldRecord?.imageUrl && dto.imageUrl !== oldRecord.imageUrl) {
+            await this.uploadService.deleteFile(oldRecord.imageUrl);
+        }
+
         return this.prisma.storyAdvertisement.update({
             where: { id },
             data: {
@@ -203,6 +281,13 @@ export class WebHomeService {
     }
 
     async updateFeaturedAd(id: number, dto: any) {
+        // Fetch old record for image deletion
+        const oldRecord = await this.prisma.featuredAdvertisement.findUnique({ where: { id } });
+
+        if (dto.imageUrl && oldRecord?.imageUrl && dto.imageUrl !== oldRecord.imageUrl) {
+            await this.uploadService.deleteFile(oldRecord.imageUrl);
+        }
+
         return this.prisma.featuredAdvertisement.update({
             where: { id },
             data: {
@@ -418,15 +503,113 @@ export class WebHomeService {
     // --- POPUP ADS ---
 
     async getPopupAds() {
+        const now = new Date();
+        // Proactively deactivate expired ads
+        await this.prisma.webPopupAd.updateMany({
+            where: {
+                isActive: true,
+                endDate: { lt: now }
+            },
+            data: { isActive: false }
+        });
+
         return this.prisma.webPopupAd.findMany({
             orderBy: { createdAt: 'desc' }
         });
     }
 
     async getActivePopupAd() {
-        return this.prisma.webPopupAd.findFirst({
-            where: { isActive: true },
-            orderBy: { createdAt: 'desc' }
+        const now = new Date();
+
+        // 1. Deactivate any expired ads first (Scheduled ads)
+        await this.prisma.webPopupAd.updateMany({
+            where: {
+                isActive: true,
+                endDate: { lt: now }
+            },
+            data: { isActive: false }
+        });
+
+        // 2. Find scheduled ads that are currently valid
+        const ads = await this.prisma.webPopupAd.findMany({
+            where: {
+                isActive: true,
+                OR: [
+                    { startDate: null },
+                    { startDate: { lte: now } }
+                ],
+                AND: [
+                    {
+                        OR: [
+                            { endDate: null },
+                            { endDate: { gte: now } }
+                        ]
+                    }
+                ]
+            }
+        });
+
+        if (ads.length > 0) {
+            // Sort to find the highest priority scheduled ad
+            const sorted = ads.sort((a, b) => {
+                if (a.startDate && !b.startDate) return -1;
+                if (!a.startDate && b.startDate) return 1;
+                if (a.startDate && b.startDate) return b.startDate.getTime() - a.startDate.getTime();
+                return b.id - a.id;
+            });
+            return sorted[0];
+        }
+
+        // 3. Fallback to Default Ad if no scheduled ads are active
+        const defaultAd = await this.prisma.webDefaultPopup.findFirst({
+            where: { isActive: true }
+        });
+
+        if (defaultAd) {
+            return {
+                ...defaultAd,
+                isDefault: true
+            };
+        }
+
+        return null;
+    }
+
+    async getDefaultPopupAd() {
+        let def = await this.prisma.webDefaultPopup.findFirst();
+        if (!def) {
+            def = await this.prisma.webDefaultPopup.create({
+                data: {
+                    title: 'Varsayılan Reklam',
+                    imageUrl: '',
+                    isActive: false,
+                    displayStrategy: 'ONCE_PER_HOUR'
+                }
+            });
+        }
+        return def;
+    }
+
+    async updateDefaultPopupAd(dto: any, file?: Express.Multer.File) {
+        const existing = await this.getDefaultPopupAd();
+
+        let imageUrl = dto.imageUrl || existing.imageUrl;
+        if (file) {
+            if (existing.imageUrl) {
+                await this.uploadService.deleteFile(existing.imageUrl);
+            }
+            imageUrl = await this.uploadService.handleFile(file, 'ads');
+        }
+
+        return this.prisma.webDefaultPopup.update({
+            where: { id: existing.id },
+            data: {
+                title: dto.title !== undefined ? dto.title : existing.title,
+                linkUrl: dto.linkUrl !== undefined ? dto.linkUrl : existing.linkUrl,
+                isActive: dto.isActive !== undefined ? (String(dto.isActive) === 'true' || dto.isActive === true || dto.isActive === 1 || dto.isActive === '1') : existing.isActive,
+                displayStrategy: dto.displayStrategy !== undefined ? dto.displayStrategy : existing.displayStrategy,
+                imageUrl
+            }
         });
     }
 
@@ -438,11 +621,30 @@ export class WebHomeService {
 
         const isActive = dto.isActive === 'true' || dto.isActive === true;
 
+        const startDate = (dto.startDate && dto.startDate !== '') ? new Date(dto.startDate) : null;
+        const endDate = (dto.endDate && dto.endDate !== '') ? new Date(dto.endDate) : null;
+
         if (isActive) {
-            await this.prisma.webPopupAd.updateMany({
-                where: { isActive: true },
-                data: { isActive: false }
+            const activeAds = await this.prisma.webPopupAd.findMany({
+                where: {
+                    isActive: true
+                }
             });
+
+            for (const ad of activeAds) {
+                if (ad.endDate && startDate && startDate < ad.endDate) {
+                    throw new BadRequestException(`Sistem Uyarısı: Yeni reklamın başlangıç tarihi (${startDate.toLocaleDateString('tr-TR')}), mevcut aktif reklamın ("${ad.title}") bitiş tarihinden (${ad.endDate.toLocaleDateString('tr-TR')}) önce olamaz.`);
+                }
+            }
+
+            if (!startDate || startDate <= new Date()) {
+                await this.prisma.webPopupAd.updateMany({
+                    where: {
+                        isActive: true
+                    },
+                    data: { isActive: false }
+                });
+            }
         }
 
         return this.prisma.webPopupAd.create({
@@ -450,7 +652,10 @@ export class WebHomeService {
                 title: dto.title,
                 imageUrl,
                 linkUrl: dto.linkUrl,
-                isActive
+                isActive,
+                startDate,
+                endDate,
+                displayStrategy: dto.displayStrategy || 'ONCE_PER_HOUR'
             }
         });
     }
@@ -472,16 +677,39 @@ export class WebHomeService {
 
         let imageUrl = dto.imageUrl || existing.imageUrl;
         if (file) {
+            if (existing.imageUrl) {
+                await this.uploadService.deleteFile(existing.imageUrl);
+            }
             imageUrl = await this.uploadService.handleFile(file, 'ads');
         }
 
         const isActive = dto.isActive !== undefined ? (dto.isActive === 'true' || dto.isActive === true) : existing.isActive;
+        const startDate = dto.startDate !== undefined ? ((dto.startDate && dto.startDate !== '') ? new Date(dto.startDate) : null) : existing.startDate;
+        const endDate = dto.endDate !== undefined ? ((dto.endDate && dto.endDate !== '') ? new Date(dto.endDate) : null) : existing.endDate;
 
-        if (isActive && !existing.isActive) {
-            await this.prisma.webPopupAd.updateMany({
-                where: { isActive: true, id: { not: id } },
-                data: { isActive: false }
+        if (isActive) {
+            const activeAds = await this.prisma.webPopupAd.findMany({
+                where: {
+                    isActive: true,
+                    id: { not: id }
+                }
             });
+
+            for (const ad of activeAds) {
+                if (ad.endDate && startDate && startDate < ad.endDate) {
+                    throw new BadRequestException(`Sistem Uyarısı: Reklamın başlangıç tarihi (${startDate.toLocaleDateString('tr-TR')}), mevcut aktif reklamın ("${ad.title}") bitiş tarihinden (${ad.endDate.toLocaleDateString('tr-TR')}) önce olamaz.`);
+                }
+            }
+
+            if (!startDate || startDate <= new Date()) {
+                await this.prisma.webPopupAd.updateMany({
+                    where: {
+                        id: { not: id },
+                        isActive: true
+                    },
+                    data: { isActive: false }
+                });
+            }
         }
 
         return this.prisma.webPopupAd.update({
@@ -490,7 +718,10 @@ export class WebHomeService {
                 title: dto.title !== undefined ? dto.title : existing.title,
                 imageUrl,
                 linkUrl: dto.linkUrl !== undefined ? dto.linkUrl : existing.linkUrl,
-                isActive
+                isActive,
+                startDate,
+                endDate,
+                displayStrategy: dto.displayStrategy !== undefined ? dto.displayStrategy : existing.displayStrategy
             }
         });
     }

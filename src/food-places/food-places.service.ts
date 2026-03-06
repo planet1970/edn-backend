@@ -2,10 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { CreateFoodPlaceDto } from './dto/create-food-place.dto';
 import { UpdateFoodPlaceDto } from './dto/update-food-place.dto';
 import { PrismaService } from '../prisma/prisma.service';
+import { UploadService } from '../common/upload/upload.service';
 
 @Injectable()
 export class FoodPlacesService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private readonly uploadService: UploadService,
+    ) { }
 
     async create(createFoodPlaceDto: CreateFoodPlaceDto) {
         const data: any = { ...createFoodPlaceDto };
@@ -57,6 +61,17 @@ export class FoodPlacesService {
 
     async update(id: number, updateFoodPlaceDto: UpdateFoodPlaceDto) {
         const data: any = { ...updateFoodPlaceDto };
+
+        // Fetch old record for image deletion
+        const oldRecord = await this.prisma.foodPlace.findUnique({ where: { id } });
+
+        if (data.imageUrl && oldRecord?.imageUrl && data.imageUrl !== oldRecord.imageUrl) {
+            await this.uploadService.deleteFile(oldRecord.imageUrl);
+        }
+
+        if (data.backImageUrl && oldRecord?.backImageUrl && data.backImageUrl !== oldRecord.backImageUrl) {
+            await this.uploadService.deleteFile(oldRecord.backImageUrl);
+        }
 
         if (data.subCategoryId !== undefined) {
             const subCatId = typeof data.subCategoryId === 'string' ? parseInt(data.subCategoryId, 10) : data.subCategoryId;

@@ -160,6 +160,17 @@ export class WebHomeController {
         return this.webHomeService.incrementPopupView(Number(id));
     }
 
+    @Get('ads/popup-default')
+    getDefaultPopupAd() {
+        return this.webHomeService.getDefaultPopupAd();
+    }
+
+    @Patch('ads/popup-default')
+    @UseInterceptors(FileInterceptor('file'))
+    updateDefaultPopupAd(@Body() dto: any, @UploadedFile() file: Express.Multer.File) {
+        return this.webHomeService.updateDefaultPopupAd(dto, file);
+    }
+
     // --- POPULAR ADS ---
 
     @Get('ads/popular')

@@ -1,9 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { UploadService } from '../common/upload/upload.service';
 
 @Injectable()
 export class PopularPlacesService {
-    constructor(private prisma: PrismaService) { }
+    constructor(
+        private prisma: PrismaService,
+        private readonly uploadService: UploadService,
+    ) { }
 
     async findAll() {
         return this.prisma.popularPlaceAdvertisement.findMany({
@@ -30,6 +34,13 @@ export class PopularPlacesService {
     }
 
     async update(id: number, dto: any) {
+        // Fetch old record for image deletion
+        const oldRecord = await this.prisma.popularPlaceAdvertisement.findUnique({ where: { id } });
+
+        if (dto.imageUrl && oldRecord?.imageUrl && dto.imageUrl !== oldRecord.imageUrl) {
+            await this.uploadService.deleteFile(oldRecord.imageUrl);
+        }
+
         return this.prisma.popularPlaceAdvertisement.update({
             where: { id },
             data: {

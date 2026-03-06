@@ -1,17 +1,32 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import * as fs from 'fs';
 import * as path from 'path';
 
 @Injectable()
 export class UploadService {
+    private readonly MAX_SIZE = 2 * 1024 * 1024; // 2MB
+    private readonly ALLOWED_MIMETYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+
     constructor(private readonly cloudinaryService: CloudinaryService) { }
+
+    private validateFile(file: Express.Multer.File) {
+        if (!this.ALLOWED_MIMETYPES.includes(file.mimetype)) {
+            throw new BadRequestException(`Geçersiz dosya formatı: ${file.mimetype}. Sadece JPG, PNG, WEBP ve GIF formatlarına izin verilir.`);
+        }
+
+        if (file.size > this.MAX_SIZE) {
+            throw new BadRequestException(`Dosya boyutu çok büyük: ${(file.size / 1024 / 1024).toFixed(2)}MB. Maksimum limit: ${this.MAX_SIZE / 1024 / 1024}MB`);
+        }
+    }
 
     async handleFile(
         file: Express.Multer.File,
         folder: string,
     ): Promise<string> {
         if (!file) return '';
+
+        this.validateFile(file);
 
         if (process.env.NODE_ENV === 'production') {
             const result = await this.cloudinaryService.uploadImage(file, folder);
@@ -37,9 +52,14 @@ export class UploadService {
         if (!fileUrl) return;
 
         try {
-            if (process.env.NODE_ENV === 'production') {
-                // Cloudinary deletion - we would need publicId
-                // For now, let's focus on local as we are in dev
+            if (process.env.NODE_ENV === 'production' || fileUrl.includes('cloudinary.com')) {
+                const urlParts = fileUrl.split('/');
+                const fileNameWithExt = urlParts[urlParts.length - 1];
+                const publicIdWithoutExt = fileNameWithExt.split('.')[0];
+                const folder = urlParts[urlParts.length - 2];
+                const publicId = `${folder}/${publicIdWithoutExt}`;
+
+                await this.cloudinaryService.deleteImage(publicId);
                 return;
             }
 

@@ -114,11 +114,17 @@ export class PlacesService {
 
         let pic_url = updatePlaceDto.pic_url || existingPlace.pic_url;
         if (file) {
+            if (existingPlace.pic_url) {
+                await this.uploadService.deleteFile(existingPlace.pic_url);
+            }
             pic_url = await this.uploadService.handleFile(file, 'places');
         }
 
         let back_pic_url = updatePlaceDto.back_pic_url || existingPlace.back_pic_url;
         if (backFile) {
+            if (existingPlace.back_pic_url) {
+                await this.uploadService.deleteFile(existingPlace.back_pic_url);
+            }
             back_pic_url = await this.uploadService.handleFile(backFile, 'places');
         }
 
