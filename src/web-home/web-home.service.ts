@@ -6,6 +6,7 @@ import { UpdateWebHeroDto } from './dto/update-web-hero.dto';
 import { UpdateSocialInfoDto } from './dto/update-social-info.dto';
 import { UpdateNavbarDto } from './dto/update-navbar.dto';
 import { UploadService } from '../common/upload/upload.service';
+import * as Parser from 'rss-parser';
 
 @Injectable()
 export class WebHomeService {
@@ -736,5 +737,120 @@ export class WebHomeService {
             }
         }
         return this.prisma.webPopupAd.delete({ where: { id } });
+    }
+
+    // --- GOOGLE NEWS & CUSTOM NEWS ---
+    private async syncNewsFromRSS() {
+        try {
+            const parser = new Parser();
+            const url = 'https://news.google.com/rss/search?q=Edirne&hl=tr&gl=TR&ceid=TR:tr';
+            const feed = await parser.parseURL(url);
+
+            if (feed?.items) {
+                for (const item of feed.items.slice(0, 15)) {
+                    if (!item.link) continue;
+                    try {
+                        const existing = await this.prisma.webNewsItem.findUnique({
+                            where: { link: item.link }
+                        });
+
+                        if (!existing) {
+                            await this.prisma.webNewsItem.create({
+                                data: {
+                                    title: item.title || '',
+                                    link: item.link,
+                                    pubDate: item.pubDate ? new Date(item.pubDate) : new Date(),
+                                    source: item.source || item.creator || 'Google Haberler',
+                                    contentSnippet: (item.content || item.contentSnippet || '').substring(0, 1000),
+                                    isActive: true,
+                                    isManual: false
+                                }
+                            }).catch(() => { /* ignore concurrent creation errors */ });
+                        }
+                    } catch (e) {
+                        // ignore individual item errors
+                    }
+                }
+            }
+        } catch (e) {
+            console.error("RSS sync error:", e);
+        }
+    }
+
+    async getEdirneNews() {
+        try {
+            const setting = await this.prisma.webSetting.findUnique({ where: { id: "GLOBAL" } });
+            if (setting && !setting.isNewsActive) {
+                return [];
+            }
+
+            await this.syncNewsFromRSS();
+
+            return await this.prisma.webNewsItem.findMany({
+                where: { isActive: true },
+                orderBy: { pubDate: 'desc' },
+                take: 10
+            });
+        } catch (error) {
+            console.error("Haberler çekilemedi:", error);
+            return [];
+        }
+    }
+
+    // --- NEWS MANAGEMENT (ADMIN) ---
+    async getNewsSettings() {
+        return this.prisma.webSetting.upsert({
+            where: { id: "GLOBAL" },
+            update: {},
+            create: { id: "GLOBAL", isNewsActive: true }
+        });
+    }
+
+    async updateNewsSettings(isActive: boolean) {
+        return this.prisma.webSetting.upsert({
+            where: { id: "GLOBAL" },
+            update: { isNewsActive: isActive },
+            create: { id: "GLOBAL", isNewsActive: isActive }
+        });
+    }
+
+    async getAllNewsItems() {
+        try {
+            await this.syncNewsFromRSS();
+            const items = await this.prisma.webNewsItem.findMany({
+                orderBy: { pubDate: 'desc' },
+                take: 15
+            });
+            console.log(`Returning ${items.length} news items for admin.`);
+            return items;
+        } catch (error) {
+            console.error("Error in getAllNewsItems:", error);
+            return [];
+        }
+    }
+
+    async toggleNewsItem(id: number, isActive: boolean) {
+        return this.prisma.webNewsItem.update({
+            where: { id },
+            data: { isActive }
+        });
+    }
+
+    async createManualNews(dto: { title: string, source: string, link: string, contentSnippet?: string }) {
+        return this.prisma.webNewsItem.create({
+            data: {
+                title: dto.title,
+                source: dto.source || 'Manuel Haber',
+                link: dto.link,
+                contentSnippet: dto.contentSnippet || '',
+                pubDate: new Date(),
+                isActive: true,
+                isManual: true
+            }
+        });
+    }
+
+    async deleteNewsItem(id: number) {
+        return this.prisma.webNewsItem.delete({ where: { id } });
     }
 }

@@ -1,5 +1,3 @@
-// Prisma schema for EDN backend
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -12,37 +10,37 @@ datasource db {
 model User {
   id                Int              @id @default(autoincrement())
   email             String           @unique
-  username          String?          @unique // Custom username chosen by the user
   password          String?
   name              String?
-  phone             String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
   googleId          String?
   imageUrl          String?
-  isEdirnelim       Boolean          @default(false) // Toggle for local community
-  role              UserType?        @relation(fields: [roleId], references: [id])
-  roleId            String?          @default("USER")
+  phone             String?
+  visitorId         String?          @unique
+  isEdirnelim       Boolean          @default(false)
+  username          String?          @unique
   isActive          Boolean          @default(true)
-  visitorId         String?          @unique // Link to the original visitor record
-  visitor           Visitor?         @relation(fields: [visitorId], references: [fingerprint])
+  roleId            String?          @default("USER")
+  completedMessages ContactMessage[] @relation("CompletedMessages")
+  pageAuthorities   PageAuthority[]
   createdPlaces     Place[]          @relation("CreatedPlaces")
   updatedPlaces     Place[]          @relation("UpdatedPlaces")
-  completedMessages ContactMessage[] @relation("CompletedMessages")
-  pageAuthorities  PageAuthority[]
-  tempPlacesUpdated TempPlace[]     @relation("TempPlaceUpdatedBy")
-  tempPlacesCreated TempPlace[]     @relation("TempPlaceCreatedBy")
-  tempFoodPlaces    TempFoodPlace[] @relation("TempFoodPlaceUpdatedBy")
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+  tempFoodPlaces    TempFoodPlace[]  @relation("TempFoodPlaceUpdatedBy")
+  tempPlacesCreated TempPlace[]      @relation("TempPlaceCreatedBy")
+  tempPlacesUpdated TempPlace[]      @relation("TempPlaceUpdatedBy")
+  role              UserType?        @relation(fields: [roleId], references: [id])
+  visitor           Visitor?         @relation(fields: [visitorId], references: [fingerprint])
 }
 
 model UserType {
-  id          String   @id // e.g., "ADMIN", "USER", "CUSTOMER"
+  id          String   @id
   title       String
   description String?
   isSystem    Boolean  @default(false)
-  users       User[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  users       User[]
 }
 
 model Category {
@@ -50,61 +48,59 @@ model Category {
   title         String
   description   String?
   iconName      String?
-  webIcon       String?
   order         Int           @default(1)
-  isActive      Boolean       @default(true)
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
-  subCategories SubCategory[]
-  pagePlans     PagePlan[] // Inverse relation
+  isActive      Boolean       @default(true)
+  webIcon       String?
+  pagePlans     PagePlan[]
   places        Place[]
+  subCategories SubCategory[]
 }
 
 model SubCategory {
   id          Int         @id @default(autoincrement())
   title       String
   description String?
-  imageUrl    String?
-  pageDesign  String?
   order       Int         @default(1)
-  isActive    Boolean     @default(true)
-  category    Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  categoryId  Int
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
-  pagePlans   PagePlan[] // Inverse relation
-  places      Place[]
+  categoryId  Int
+  imageUrl    String?
+  pageDesign  String?
+  isActive    Boolean     @default(true)
   foodPlaces  FoodPlace[]
+  pagePlans   PagePlan[]
+  places      Place[]
+  category    Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 }
 
 model Place {
-  id              Int     @id @default(autoincrement())
-  title           String
-  slug            String?
-  pic_url         String?
-  back_pic_url    String?
-  icon1           String?
-  title1          String?
-  info1           String?
-  icon2           String?
-  title2          String?
-  info2           String?
-  icon3           String?
-  title3          String?
-  info3           String?
-  icon4           String?
-  title4          String?
-  info4           String?
-  description     String?
-  rating          Float?
-  panel1_title    String?
-  panel1          String?
-  panel2_title    String?
-  panel2          String?
-  panel_col_title String?
-  panel_col       String?
-  panel3_title    String?
-
+  id               Int          @id @default(autoincrement())
+  title            String
+  slug             String?
+  pic_url          String?
+  icon1            String?
+  title1           String?
+  info1            String?
+  icon2            String?
+  title2           String?
+  info2            String?
+  icon3            String?
+  title3           String?
+  info3            String?
+  icon4            String?
+  title4           String?
+  info4            String?
+  description      String?
+  rating           Float?
+  panel1_title     String?
+  panel1           String?
+  panel2_title     String?
+  panel2           String?
+  panel_col_title  String?
+  panel_col        String?
+  panel3_title     String?
   panel3           String?
   panel4_title     String?
   panel4           String?
@@ -122,33 +118,33 @@ model Place {
   area9            String?
   area10           String?
   source           String?
-  order            Int          @default(0)
   isActive         Boolean      @default(true)
-  category         Category?    @relation(fields: [categoryId], references: [id])
-  categoryId       Int?
-  subCategory      SubCategory? @relation(fields: [subCategoryId], references: [id])
-  subCategoryId    Int?
-  createdBy        User?        @relation("CreatedPlaces", fields: [createdById], references: [id])
   createdById      Int?
-  updatedBy        User?        @relation("UpdatedPlaces", fields: [updatedById], references: [id])
   updatedById      Int?
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
+  order            Int          @default(0)
+  back_pic_url     String?
+  categoryId       Int?
+  subCategoryId    Int?
+  category         Category?    @relation(fields: [categoryId], references: [id])
+  createdBy        User?        @relation("CreatedPlaces", fields: [createdById], references: [id])
+  subCategory      SubCategory? @relation(fields: [subCategoryId], references: [id])
+  updatedBy        User?        @relation("UpdatedPlaces", fields: [updatedById], references: [id])
 }
 
 model PagePlan {
-  id               String   @id @default(uuid())
+  id               String      @id @default(uuid())
   categoryId       Int
   subCategoryId    Int
   pageDefinitionId String
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  pageTitle        String?
   slug             String?
   source           String?
-  pageTitle        String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
-  category    Category    @relation(fields: [categoryId], references: [id])
-  subCategory SubCategory @relation(fields: [subCategoryId], references: [id])
+  category         Category    @relation(fields: [categoryId], references: [id])
+  subCategory      SubCategory @relation(fields: [subCategoryId], references: [id])
 }
 
 model PageDefinition {
@@ -167,15 +163,14 @@ model PageLink {
   title       String
   description String?
   slug        String   @unique
-  targetTable String   @default("PLACE") // "PLACE" or "FOOD_PLACE"
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  targetTable String   @default("PLACE")
 }
 
 model FoodPlace {
   id            Int         @id @default(autoincrement())
   title         String
-  slug          String?
   subtitle      String?
   mainColor     String?
   imageUrl      String?
@@ -184,10 +179,7 @@ model FoodPlace {
   badge         String?
   rating        Float?
   storyTitle    String?
-  description   String?
-  backContent   String?
   phone         String?
-  hoursEveryday String?
   hoursMon      String?
   hoursTue      String?
   hoursWed      String?
@@ -234,10 +226,14 @@ model FoodPlace {
   field4        String?
   field5        String?
   isActive      Boolean     @default(true)
-  subCategory   SubCategory @relation(fields: [subCategoryId], references: [id])
   subCategoryId Int
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
+  slug          String?
+  hoursEveryday String?
+  backContent   String?
+  description   String?
+  subCategory   SubCategory @relation(fields: [subCategoryId], references: [id])
 }
 
 model SplashScreen {
@@ -255,10 +251,10 @@ model OnboardingScreen {
   title       String
   description String
   imageUrl    String
-  icon        String?  @default("map")
   order       Int      @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  icon        String?  @default("map")
 }
 
 model WebHeroSlide {
@@ -281,13 +277,13 @@ model WebSocialInfo {
   phone        String?
   email        String?
   address      String?
-  workingHours String?
   facebook     String?
   instagram    String?
   twitter      String?
   youtube      String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+  workingHours String?
 }
 
 model WebNavbar {
@@ -297,16 +293,15 @@ model WebNavbar {
   titleColor String?  @default("#333333")
   fontFamily String?  @default("Inter")
   fontSize   Int?     @default(24)
-  bgColor    String?  @default("#1A1A2E")
-  iconColor  String?  @default("#FFB627")
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+  bgColor    String?  @default("#1A1A2E")
+  iconColor  String?  @default("#FFB627")
 }
 
 model Visitor {
   id            String   @id @default(uuid())
   fingerprint   String   @unique
-  username      String?  @unique // Format: EDN-XXXXX
   lastIp        String?
   userAgent     String?
   lastVisitAt   DateTime @default(now())
@@ -314,51 +309,46 @@ model Visitor {
   customMessage String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  username      String?  @unique
   User          User?
 }
 
 model StoryAdvertisement {
-  id       Int     @id @default(autoincrement())
-  title    String
-  imageUrl String?
-  link     String? @default("#")
-  isNew    Boolean @default(true)
-  order    Int     @default(0)
-  isActive Boolean @default(true)
-
-  // Generic relations back to source
-  sourceType String? // "PLACE" or "FOOD_PLACE"
+  id         Int      @id @default(autoincrement())
+  title      String
+  imageUrl   String?
+  link       String?  @default("#")
+  isNew      Boolean  @default(true)
+  order      Int      @default(0)
+  isActive   Boolean  @default(true)
+  sourceType String?
   sourceId   Int?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }
 
 model FeaturedAdvertisement {
-  id           Int     @id @default(autoincrement())
+  id           Int      @id @default(autoincrement())
   title        String
-  mainCategory String?
   category     String?
   imageUrl     String?
   discount     String?
   description  String?
-  rating       Float?  @default(0)
-  link         String? @default("#")
-  order        Int     @default(0)
-  isActive     Boolean @default(true)
-
-  // Generic relations back to source
-  sourceType String? // "PLACE" or "FOOD_PLACE"
-  sourceId   Int?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  rating       Float?   @default(0)
+  link         String?  @default("#")
+  order        Int      @default(0)
+  isActive     Boolean  @default(true)
+  sourceType   String?
+  sourceId     Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  mainCategory String?
 }
 
 model WebGoogleAd {
   id         Int      @id @default(autoincrement())
-  areaName   String   @unique // e.g., "SIDEBAR_LEFT", "SIDEBAR_RIGHT"
-  type       String   @default("SCRIPT") // "SCRIPT" or "IMAGE"
+  areaName   String   @unique
+  type       String   @default("SCRIPT")
   scriptCode String?
   imageUrl   String?
   linkUrl    String?
@@ -369,17 +359,17 @@ model WebGoogleAd {
 
 model WebPopupAd {
   id              Int       @id @default(autoincrement())
-  title           String?
   imageUrl        String
   linkUrl         String?
   isActive        Boolean   @default(false)
-  isDefault       Boolean   @default(false)
-  viewCount       Int       @default(0)
-  startDate       DateTime?
-  endDate         DateTime?
-  displayStrategy String    @default("ALWAYS") // ALWAYS, ONCE_PER_SESSION, ONCE_PER_DAY
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+  title           String?
+  viewCount       Int       @default(0)
+  displayStrategy String    @default("ALWAYS")
+  endDate         DateTime?
+  startDate       DateTime?
+  isDefault       Boolean   @default(false)
 }
 
 model WebDefaultPopup {
@@ -393,40 +383,37 @@ model WebDefaultPopup {
 }
 
 model PopularPlaceAdvertisement {
-  id          Int     @id @default(autoincrement())
-  title       String
-  description String?
-  imageUrl    String?
-  rating      Float?  @default(0)
-  visitCount  Int?    @default(0)
-  link        String? @default("#")
-  badge       String? // e.g., "UNESCO", "Tarihi"
-  hours       String? // e.g., "09:00 - 18:00"
-  location    String? // e.g., "Merkez", "Sarayiçi"
-  icon1       String?
-  info1       String?
-  icon2       String?
-  info2       String?
-  order       Int     @default(0)
-  isActive    Boolean @default(true)
-
-  // Generic relations back to source
-  sourceType String? // "PLACE" or "FOOD_PLACE"
-  sourceId   Int?
-
-  mainCategory String? // Category name for the badge
-  category     String? // Subcategory name for the footer
+  id           Int      @id @default(autoincrement())
+  title        String
+  description  String?
+  imageUrl     String?
+  rating       Float?   @default(0)
+  visitCount   Int?     @default(0)
+  link         String?  @default("#")
+  badge        String?
+  hours        String?
+  location     String?
+  order        Int      @default(0)
+  isActive     Boolean  @default(true)
+  sourceType   String?
+  sourceId     Int?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+  icon1        String?
+  icon2        String?
+  info1        String?
+  info2        String?
+  category     String?
+  mainCategory String?
 }
 
 model WebAboutSection {
   id          Int            @id @default(autoincrement())
   title       String?
   description String?
-  cards       WebAboutCard[]
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
+  cards       WebAboutCard[]
 }
 
 model WebAboutCard {
@@ -438,9 +425,9 @@ model WebAboutCard {
   order     Int             @default(0)
   isActive  Boolean         @default(true)
   sectionId Int
-  section   WebAboutSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
   createdAt DateTime        @default(now())
   updatedAt DateTime        @updatedAt
+  section   WebAboutSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
 }
 
 model ContactMessage {
@@ -449,88 +436,87 @@ model ContactMessage {
   email         String
   subject       String?
   message       String
-  status        String   @default("Bekliyor") // "Bekliyor" or "Tamamlandı"
-  completedBy   User?    @relation("CompletedMessages", fields: [completedById], references: [id])
+  status        String   @default("Bekliyor")
   completedById Int?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  completedBy   User?    @relation("CompletedMessages", fields: [completedById], references: [id])
 }
 
 model PageAuthority {
   id         Int      @id @default(autoincrement())
   userId     Int
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  sourceType String // "PLACE" or "FOOD_PLACE"
+  sourceType String
   sourceId   Int
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, sourceType, sourceId])
 }
 
 model TempPlace {
-  id              Int      @id @default(autoincrement())
-  originalId      Int? // ID of the original Place record
-  title           String
-  slug            String?
-  pic_url         String?
-  back_pic_url    String?
-  icon1           String?
-  title1          String?
-  info1           String?
-  icon2           String?
-  title2          String?
-  info2           String?
-  icon3           String?
-  title3          String?
-  info3           String?
-  icon4           String?
-  title4          String?
-  info4           String?
-  description     String?
-  rating          Float?
-  panel1_title    String?
-  panel1          String?
-  panel2_title    String?
-  panel2          String?
-  panel_col_title String?
-  panel_col       String?
-  panel3_title    String?
-  panel3          String?
-  panel4_title    String?
-  panel4          String?
+  id               Int      @id @default(autoincrement())
+  originalId       Int?
+  title            String
+  pic_url          String?
+  back_pic_url     String?
+  icon1            String?
+  title1           String?
+  info1            String?
+  icon2            String?
+  title2           String?
+  info2            String?
+  icon3            String?
+  title3           String?
+  info3            String?
+  icon4            String?
+  title4           String?
+  info4            String?
+  description      String?
+  rating           Float?
+  panel1_title     String?
+  panel1           String?
+  panel2_title     String?
+  panel2           String?
+  panel_col_title  String?
+  panel_col        String?
+  panel3_title     String?
+  panel3           String?
+  panel4_title     String?
+  panel4           String?
   panel_col_title2 String?
   panel_col2       String?
   panel5_title     String?
-  area1           String?
-  area2           String?
-  area3           String?
-  area4           String?
-  area5           String?
-  area6           String?
-  area7           String?
-  area8           String?
-  area9           String?
-  area10          String?
-  source          String?
-  order           Int      @default(0)
-  categoryId      Int?
-  subCategoryId   Int?
-  isActive        Boolean  @default(true)
-  updatedBy       User?    @relation("TempPlaceUpdatedBy", fields: [updatedById], references: [id])
-  updatedById     Int?
-  createdBy       User?    @relation("TempPlaceCreatedBy", fields: [createdById], references: [id])
-  createdById     Int?
-  status          String   @default("PENDING") // PENDING, APPROVED, REJECTED
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  area1            String?
+  area2            String?
+  area3            String?
+  area4            String?
+  area5            String?
+  area6            String?
+  area7            String?
+  area8            String?
+  area9            String?
+  area10           String?
+  source           String?
+  order            Int      @default(0)
+  categoryId       Int?
+  subCategoryId    Int?
+  updatedById      Int?
+  status           String   @default("PENDING")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  createdById      Int?
+  isActive         Boolean  @default(true)
+  slug             String?
+  createdBy        User?    @relation("TempPlaceCreatedBy", fields: [createdById], references: [id])
+  updatedBy        User?    @relation("TempPlaceUpdatedBy", fields: [updatedById], references: [id])
 }
 
 model TempFoodPlace {
   id            Int      @id @default(autoincrement())
-  originalId    Int? // ID of the original FoodPlace record
+  originalId    Int?
   title         String
-  slug          String?
   subtitle      String?
   mainColor     String?
   imageUrl      String?
@@ -588,11 +574,31 @@ model TempFoodPlace {
   field3        String?
   field4        String?
   field5        String?
-  isActive      Boolean  @default(true)
   subCategoryId Int
-  updatedBy     User?    @relation("TempFoodPlaceUpdatedBy", fields: [updatedById], references: [id])
   updatedById   Int?
-  status        String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  status        String   @default("PENDING")
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
+  isActive      Boolean  @default(true)
+  slug          String?
+  updatedBy     User?    @relation("TempFoodPlaceUpdatedBy", fields: [updatedById], references: [id])
+}
+
+model WebSetting {
+  id           String   @id @default("GLOBAL")
+  isNewsActive Boolean  @default(true)
+  updatedAt    DateTime @updatedAt
+}
+
+model WebNewsItem {
+  id             Int       @id @default(autoincrement())
+  title          String
+  link           String    @unique
+  pubDate        DateTime?
+  source         String?
+  contentSnippet String?
+  isActive       Boolean   @default(true)
+  isManual       Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 }

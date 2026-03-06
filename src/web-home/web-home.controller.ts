@@ -229,4 +229,43 @@ export class WebHomeController {
     reorderAboutCards(@Body() ids: number[]) {
         return this.webHomeService.reorderAboutCards(ids);
     }
+
+    // --- GOOGLE NEWS ---
+
+    @Get('news')
+    getEdirneNews() {
+        return this.webHomeService.getEdirneNews();
+    }
+
+    // --- NEWS MANAGEMENT ADMIN ---
+
+    @Get('news-settings')
+    getNewsSettings() {
+        return this.webHomeService.getNewsSettings();
+    }
+
+    @Post('news-settings')
+    updateNewsSettings(@Body() dto: { isActive: boolean }) {
+        return this.webHomeService.updateNewsSettings(dto.isActive);
+    }
+
+    @Get('news-items')
+    getAllNewsItems() {
+        return this.webHomeService.getAllNewsItems();
+    }
+
+    @Post('news-items')
+    createManualNews(@Body() dto: { title: string, source: string, link: string, contentSnippet?: string }) {
+        return this.webHomeService.createManualNews(dto);
+    }
+
+    @Patch('news-items/:id/toggle')
+    toggleNewsItem(@Param('id') id: string, @Body() dto: { isActive: boolean }) {
+        return this.webHomeService.toggleNewsItem(Number(id), dto.isActive);
+    }
+
+    @Delete('news-items/:id')
+    deleteNewsItem(@Param('id') id: string) {
+        return this.webHomeService.deleteNewsItem(Number(id));
+    }
 }
