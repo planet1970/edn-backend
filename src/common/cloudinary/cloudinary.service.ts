@@ -27,6 +27,33 @@ export class CloudinaryService {
             streamifier.createReadStream(file.buffer).pipe(uploadStream);
         });
     }
+    async listResources() {
+        return new Promise((resolve, reject) => {
+            cloudinary.api.resources(
+                {
+                    resource_type: 'image',
+                    type: 'upload',
+                    max_results: 500 // Adjusted as per requirement
+                },
+                (error, result) => {
+                    if (error) return reject(error);
+                    resolve(result);
+                }
+            );
+        });
+    }
+
+    async getStats() {
+        return new Promise((resolve, reject) => {
+            cloudinary.api.usage(
+                (error, result) => {
+                    if (error) return reject(error);
+                    resolve(result);
+                }
+            );
+        });
+    }
+
     async deleteImage(publicId: string): Promise<any> {
         return new Promise((resolve, reject) => {
             cloudinary.uploader.destroy(publicId, (error, result) => {
