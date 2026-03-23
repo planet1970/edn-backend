@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Body, Patch, Param, Delete, ParseIntPipe, UseInterceptors, Query, UploadedFiles } from '@nestjs/common';
+import { CacheInterceptor } from '@nestjs/cache-manager';
 import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import { PlacesService } from './places.service';
 import { CreatePlaceDto } from './dto/create-place.dto';
@@ -24,6 +25,7 @@ export class PlacesController {
     }
 
     @Get()
+    @UseInterceptors(CacheInterceptor)
     findAll(@Query('slug') slug?: string, @Query('subCategoryId') subCategoryId?: string) {
         const subCatId = subCategoryId ? parseInt(subCategoryId, 10) : undefined;
         return this.placesService.findAll(slug, subCatId);

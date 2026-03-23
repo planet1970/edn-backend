@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Body, Patch, Param, Delete, UseInterceptors, UploadedFile, Query } from '@nestjs/common';
+import { CacheInterceptor } from '@nestjs/cache-manager';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { WebHomeService } from './web-home.service';
 import { CreateWebHeroDto } from './dto/create-web-hero.dto';
@@ -17,6 +18,7 @@ export class WebHomeController {
     }
 
     @Get('hero')
+    @UseInterceptors(CacheInterceptor)
     findAllHero() {
         return this.webHomeService.findAllHero();
     }
@@ -33,6 +35,7 @@ export class WebHomeController {
     }
 
     @Get('social')
+    @UseInterceptors(CacheInterceptor)
     getSocialInfo() {
         return this.webHomeService.getSocialInfo();
     }
@@ -43,6 +46,7 @@ export class WebHomeController {
     }
 
     @Get('navbar')
+    @UseInterceptors(CacheInterceptor)
     getNavbar() {
         return this.webHomeService.getNavbar();
     }
@@ -57,6 +61,7 @@ export class WebHomeController {
     // --- STORY ADS ---
 
     @Get('ads/story')
+    @UseInterceptors(CacheInterceptor)
     findAllStoryAds() {
         return this.webHomeService.findAllStoryAds();
     }
@@ -84,6 +89,7 @@ export class WebHomeController {
     // --- FEATURED ADS ---
 
     @Get('ads/featured')
+    @UseInterceptors(CacheInterceptor)
     findAllFeaturedAds() {
         return this.webHomeService.findAllFeaturedAds();
     }
@@ -111,6 +117,7 @@ export class WebHomeController {
     // --- GOOGLE ADS ---
 
     @Get('ads/google')
+    @UseInterceptors(CacheInterceptor)
     findAllGoogleAds() {
         return this.webHomeService.findAllGoogleAds();
     }
@@ -134,6 +141,7 @@ export class WebHomeController {
     }
 
     @Get('ads/popup/active')
+    @UseInterceptors(CacheInterceptor)
     getActivePopupAd() {
         return this.webHomeService.getActivePopupAd();
     }
@@ -174,6 +182,7 @@ export class WebHomeController {
     // --- POPULAR ADS ---
 
     @Get('ads/popular')
+    @UseInterceptors(CacheInterceptor)
     findAllPopularAds() {
         return this.webHomeService.findAllPopularAds();
     }
@@ -201,6 +210,7 @@ export class WebHomeController {
     // --- ABOUT SECTION ---
 
     @Get('about')
+    @UseInterceptors(CacheInterceptor)
     getAboutSection() {
         return this.webHomeService.getAboutSection();
     }
@@ -233,6 +243,7 @@ export class WebHomeController {
     // --- GOOGLE NEWS ---
 
     @Get('news')
+    @UseInterceptors(CacheInterceptor)
     getEdirneNews() {
         return this.webHomeService.getEdirneNews();
     }

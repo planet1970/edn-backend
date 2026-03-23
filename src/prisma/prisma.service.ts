@@ -1,5 +1,8 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
+import { PrismaNeon } from '@prisma/adapter-neon';
+import { Pool, neonConfig } from '@neondatabase/serverless';
+import * as WebSocket from 'ws';
 
 @Injectable()
 export class PrismaService
@@ -7,18 +10,26 @@ export class PrismaService
   implements OnModuleInit, OnModuleDestroy
 {
   constructor() {
+    // Neon Serverless Configuration
+    neonConfig.webSocketConstructor = WebSocket;
+    const connectionString = process.env.DATABASE_URL;
+    if (!connectionString) {
+      throw new Error('DATABASE_URL is not defined');
+    }
+    const pool = new Pool({ connectionString });
+    const adapter = new PrismaNeon(pool);
+
     super({
-      log: ['info', 'warn', 'error'], // Log seviyeleri
-    });
+      adapter: adapter as any,
+      log: ['info', 'warn', 'error'],
+    } as any);
   }
 
   async onModuleInit() {
-    // Fix: Cast to any to access $connect which might be missing in generated types
     await (this as any).$connect();
   }
 
   async onModuleDestroy() {
-    // Fix: Cast to any to access $disconnect which might be missing in generated types
     await (this as any).$disconnect();
   }
 }
