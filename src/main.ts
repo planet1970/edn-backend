@@ -9,18 +9,18 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   // Increase body parser limit for large JSON and URL-encoded data
-  const express = require('express');
-  app.use(express.json({ limit: '50mb' }));
-  app.use(express.urlencoded({ limit: '50mb', extended: true }));
+  app.use(require('body-parser').json({ limit: '50mb' }));
+  app.use(require('body-parser').urlencoded({ limit: '50mb', extended: true }));
 
   // Global Prefix
   app.setGlobalPrefix('api/v1');
 
   // CORS Configuration (Allow Mobile and Web)
   app.enableCors({
-    origin: '*', // Production'da spesifik domainlerle değiştirilmeli (örn: admin.edn.com)
+    origin: true, // Reflects the origin of the request
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
+    allowedHeaders: 'Content-Type,Accept,Authorization',
   });
 
   // Global Validation Pipe
