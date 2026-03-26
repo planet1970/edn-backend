@@ -41,7 +41,7 @@ jobs:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
           password: ${{ secrets.PASSWORD }}
-          source: "dist/*,package.json,package-lock.json,prisma/*"
+          source: "dist,package.json,package-lock.json,prisma"
           target: "/root/edn/backend"
 
       - name: Deploy on Server
@@ -52,15 +52,15 @@ jobs:
           password: ${{ secrets.PASSWORD }}
           script: |
             cd /root/edn/backend
-            # Proje ile ayni Prisma surumunu kullanalim
+            # Bagımlılıkları kuralım (Prisma generate scripti package.json içinde olmalı)
             npm install --production --legacy-peer-deps
-            npx prisma@5.7.0 generate
+            npx prisma generate
             
-            # Create .env file dynamically
-            echo "DATABASE_URL=\"${{ secrets.DATABASE_URL }}\"" > .env
-            echo "JWT_SECRET=\"${{ secrets.JWT_SECRET }}\"" >> .env
+            # .env dosyasını TIRNAKSIZ oluşturalım
+            echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" > .env
+            echo "JWT_SECRET=${{ secrets.JWT_SECRET }}" >> .env
             
-            # Restart the application with PM2
+            # Proje giriş noktasını main.js olarak kontrol edelim ve başlatalım
             pm2 delete edn-backend || true
-            pm2 start dist/index.js --name "edn-backend"
+            pm2 start dist/main.js --name "edn-backend"
             pm2 save
