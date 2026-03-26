@@ -62,5 +62,5 @@ jobs:
             
             # Restart the application with PM2
             pm2 delete edn-backend || true
-            pm2 start dist/main.js --name "edn-backend"
+            pm2 start dist/index.js --name "edn-backend"
             pm2 save
