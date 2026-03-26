@@ -41,7 +41,7 @@ jobs:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
           password: ${{ secrets.PASSWORD }}
-          source: "dist,package.json,package-lock.json,prisma"
+          source: "dist/*,package.json,package-lock.json,prisma/*"
           target: "/root/edn/backend"
 
       - name: Deploy on Server
@@ -52,8 +52,9 @@ jobs:
           password: ${{ secrets.PASSWORD }}
           script: |
             cd /root/edn/backend
-            npm install --production
-            npx prisma generate
+            # Proje ile ayni Prisma surumunu kullanalim
+            npm install --production --legacy-peer-deps
+            npx prisma@5.7.0 generate
             
             # Create .env file dynamically
             echo "DATABASE_URL=\"${{ secrets.DATABASE_URL }}\"" > .env
