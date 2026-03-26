@@ -10,7 +10,6 @@ export class CategoriesController {
   constructor(private readonly categoriesService: CategoriesService) { }
 
   @Get()
-  @UseInterceptors(CacheInterceptor)
   @ApiOperation({ summary: 'Kategorileri listele' })
   findAll() {
     return this.categoriesService.findAll();

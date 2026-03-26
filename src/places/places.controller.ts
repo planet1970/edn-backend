@@ -25,7 +25,6 @@ export class PlacesController {
     }
 
     @Get()
-    @UseInterceptors(CacheInterceptor)
     findAll(@Query('slug') slug?: string, @Query('subCategoryId') subCategoryId?: string) {
         const subCatId = subCategoryId ? parseInt(subCategoryId, 10) : undefined;
         return this.placesService.findAll(slug, subCatId);
