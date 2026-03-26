@@ -14,52 +14,59 @@ export class VisitorsService {
     }
 
     async trackVisitor(fingerprint: string, ip?: string, userAgent?: string) {
-        let visitor = await this.prisma.visitor.findUnique({
-            where: { fingerprint },
-        });
-
-        if (visitor) {
-            const updatedVisitor = await this.prisma.visitor.update({
+        try {
+            let visitor = await this.prisma.visitor.findUnique({
                 where: { fingerprint },
-                data: {
-                    lastIp: ip,
-                    userAgent,
-                    lastVisitAt: new Date(),
-                    visitCount: { increment: 1 },
-                },
             });
 
-            // If visitor is linked to a user, merge user data
-            const user = await this.prisma.user.findUnique({ where: { visitorId: fingerprint } });
-            if (user) {
-                return {
-                    ...updatedVisitor,
-                    username: user.username || updatedVisitor.username,
-                    name: user.name,
-                    imageUrl: user.imageUrl,
-                    email: user.email
-                };
-            }
-            return updatedVisitor;
-        } else {
-            // Generate a unique EDN-XXXX username
-            let username = '';
-            let isUnique = false;
-            while (!isUnique) {
-                const randomId = Math.floor(1000 + Math.random() * 9000); // 4 digits
-                username = `EDN-${randomId}`;
-                const existingName = await this.prisma.visitor.findUnique({ where: { username } });
-                if (!existingName) isUnique = true;
-            }
+            if (visitor) {
+                const updatedVisitor = await this.prisma.visitor.update({
+                    where: { fingerprint },
+                    data: {
+                        lastIp: ip,
+                        userAgent,
+                        lastVisitAt: new Date(),
+                        visitCount: { increment: 1 },
+                    },
+                });
 
-            return this.prisma.visitor.create({
-                data: {
-                    fingerprint,
-                    username,
-                    lastIp: ip,
-                    userAgent,
-                    visitCount: 1,
-                },
+                // If visitor is linked to a user, merge user data
+                const user = await this.prisma.user.findUnique({ where: { visitorId: fingerprint } });
+                if (user) {
+                    return {
+                        ...updatedVisitor,
+                        username: user.username || updatedVisitor.username,
+                        name: user.name,
+                        imageUrl: user.imageUrl,
+                        email: user.email
+                    };
+                }
+                return updatedVisitor;
+            } else {
+                // Generate a unique EDN-XXXX username
+                let username = '';
+                let isUnique = false;
+                while (!isUnique) {
+                    const randomId = Math.floor(1000 + Math.random() * 9000); // 4 digits
+                    username = `EDN-${randomId}`;
+                    const existingName = await this.prisma.visitor.findUnique({ where: { username } });
+                    if (!existingName) isUnique = true;
+                }
+
+                return await this.prisma.visitor.create({
+                    data: {
+                        fingerprint,
+                        username,
+                        lastIp: ip,
+                        userAgent,
+                        visitCount: 1,
+                    },
+                });
+            }
+        } catch (error) {
+            // Eğer unique constraint hatası gelirse (Race condition), mevcut olanı tekrar bulup dön
+            return await this.prisma.visitor.findUnique({
+                where: { fingerprint },
             });
         }
     }
