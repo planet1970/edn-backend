@@ -21,6 +21,8 @@ async function bootstrap() {
       'https://www.edirnego.com',
       'https://edirnego.com',
       'https://api.edirnego.com',
+      'https://edmin.edirnego.com',
+      'https://www.edmin.edirnego.com',
       'http://localhost:3000',
       'http://localhost:3001',
       'http://localhost:5173',
@@ -28,6 +30,8 @@ async function bootstrap() {
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
     allowedHeaders: 'Content-Type,Accept,Authorization,X-Requested-With',
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
   });
 
   // Global Validation Pipe
