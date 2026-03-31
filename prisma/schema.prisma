@@ -233,6 +233,7 @@ model FoodPlace {
   slug          String?
   hoursEveryday String?
   backContent   String?
+  frontContent  String?
   description   String?
   subCategory   SubCategory @relation(fields: [subCategoryId], references: [id])
 }
@@ -527,6 +528,7 @@ model TempFoodPlace {
   rating        Float?
   storyTitle    String?
   description   String?
+  frontContent  String?
   backContent   String?
   phone         String?
   hoursEveryday String?

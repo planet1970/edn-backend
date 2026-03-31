@@ -15,12 +15,19 @@ async function bootstrap() {
   // Global Prefix
   app.setGlobalPrefix('api/v1');
 
-  // CORS Configuration (Allow Mobile and Web)
+  // CORS Configuration
   app.enableCors({
-    origin: true, // Reflects the origin of the request
+    origin: [
+      'https://www.edirnego.com',
+      'https://edirnego.com',
+      'https://api.edirnego.com',
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://localhost:5173',
+    ],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
-    allowedHeaders: 'Content-Type,Accept,Authorization',
+    allowedHeaders: 'Content-Type,Accept,Authorization,X-Requested-With',
   });
 
   // Global Validation Pipe

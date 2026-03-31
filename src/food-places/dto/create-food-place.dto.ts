@@ -48,6 +48,10 @@ export class CreateFoodPlaceDto {
 
     @IsOptional()
     @IsString()
+    frontContent?: string;
+
+    @IsOptional()
+    @IsString()
     backContent?: string;
 
     @IsOptional()
