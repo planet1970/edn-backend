@@ -28,7 +28,9 @@ export class UploadService {
 
         this.validateFile(file);
 
-        if (process.env.NODE_ENV === 'production') {
+        const useCloudinary = process.env.NODE_ENV === 'production' || !!process.env.CLOUDINARY_CLOUD_NAME;
+
+        if (useCloudinary) {
             const result = await this.cloudinaryService.uploadImage(file, folder);
             return result.secure_url;
         }
@@ -52,7 +54,9 @@ export class UploadService {
         if (!fileUrl) return;
 
         try {
-            if (process.env.NODE_ENV === 'production' || fileUrl.includes('cloudinary.com')) {
+            const isCloudinary = !!process.env.CLOUDINARY_CLOUD_NAME || fileUrl.includes('cloudinary.com');
+
+            if (isCloudinary) {
                 const urlParts = fileUrl.split('/');
                 const fileNameWithExt = urlParts[urlParts.length - 1];
                 const publicIdWithoutExt = fileNameWithExt.split('.')[0];
