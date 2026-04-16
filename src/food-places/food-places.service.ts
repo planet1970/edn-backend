@@ -57,23 +57,34 @@ export class FoodPlacesService {
         }
     }
 
-    findAll(subCategoryId?: number) {
-        if (subCategoryId) {
-            return this.prisma.foodPlace.findMany({
-                where: { subCategoryId },
+    async findAll(subCategoryId?: number) {
+        try {
+            const where: any = {};
+            if (subCategoryId) where.subCategoryId = subCategoryId;
+
+            return await this.prisma.foodPlace.findMany({
+                where,
                 include: { subCategory: true },
             });
+        } catch (error) {
+            console.error('Error finding food places:', error);
+            // Fallback: try without include if relations are broken
+            const where: any = {};
+            if (subCategoryId) where.subCategoryId = subCategoryId;
+            return await this.prisma.foodPlace.findMany({ where });
         }
-        return this.prisma.foodPlace.findMany({
-            include: { subCategory: true },
-        });
     }
 
-    findOne(id: number) {
-        return this.prisma.foodPlace.findUnique({
-            where: { id },
-            include: { subCategory: true },
-        });
+    async findOne(id: number) {
+        try {
+            return await this.prisma.foodPlace.findUnique({
+                where: { id },
+                include: { subCategory: true },
+            });
+        } catch (error) {
+            console.error('Error finding food place:', error);
+            return await this.prisma.foodPlace.findUnique({ where: { id } });
+        }
     }
 
     async update(id: number, updateFoodPlaceDto: UpdateFoodPlaceDto) {
