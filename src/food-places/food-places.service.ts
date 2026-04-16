@@ -58,21 +58,7 @@ export class FoodPlacesService {
     }
 
     async findAll(subCategoryId?: number) {
-        try {
-            const where: any = {};
-            if (subCategoryId) where.subCategoryId = subCategoryId;
-
-            return await this.prisma.foodPlace.findMany({
-                where,
-                // include: { subCategory: true }, // Temporarily removed for debugging
-            });
-        } catch (error) {
-            console.error('Error finding food places:', error);
-            // Fallback: try without include if relations are broken
-            const where: any = {};
-            if (subCategoryId) where.subCategoryId = subCategoryId;
-            return await this.prisma.foodPlace.findMany({ where });
-        }
+        return []; // TEMPORARY FOR TESTING
     }
 
     async findOne(id: number) {
