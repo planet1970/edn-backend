@@ -64,7 +64,7 @@ export class FoodPlacesService {
 
             return await this.prisma.foodPlace.findMany({
                 where,
-                include: { subCategory: true },
+                // include: { subCategory: true }, // Temporarily removed for debugging
             });
         } catch (error) {
             console.error('Error finding food places:', error);
