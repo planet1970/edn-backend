@@ -12,32 +12,49 @@ export class FoodPlacesService {
     ) { }
 
     async create(createFoodPlaceDto: CreateFoodPlaceDto) {
-        const data: any = { ...createFoodPlaceDto };
+        try {
+            const data: any = { ...createFoodPlaceDto };
 
-        if (data.subCategoryId !== undefined) {
-            const subCatId = typeof data.subCategoryId === 'string' ? parseInt(data.subCategoryId, 10) : data.subCategoryId;
-            if (subCatId) {
-                data.subCategory = { connect: { id: subCatId } };
+            if (data.subCategoryId !== undefined) {
+                const subCatId = typeof data.subCategoryId === 'string' ? parseInt(data.subCategoryId, 10) : data.subCategoryId;
+                if (subCatId && !isNaN(subCatId)) {
+                    data.subCategory = { connect: { id: subCatId } };
+                } else {
+                    delete data.subCategory;
+                }
+                delete data.subCategoryId;
             } else {
                 delete data.subCategory;
             }
-            delete data.subCategoryId;
-        } else {
-            delete data.subCategory;
+
+            // Remove read-only or invalid fields that might come from frontend's Object.keys() spread
+            delete data.id;
+            delete data.createdAt;
+            delete data.updatedAt;
+            delete data.story; // From older frontend version
+            delete data.createdBy;
+            delete data.updatedBy;
+            delete data.createdById;
+            delete data.updatedById;
+
+            // Handle numeric and boolean fields from FormData
+            if (data.rating !== undefined) {
+                if (typeof data.rating === 'string') {
+                    const parsed = parseFloat(data.rating);
+                    data.rating = isNaN(parsed) ? null : parsed;
+                } else if (isNaN(data.rating)) {
+                    data.rating = null;
+                }
+            }
+            if (data.isActive !== undefined && typeof data.isActive === 'string') data.isActive = data.isActive === 'true';
+
+            return await this.prisma.foodPlace.create({
+                data: data,
+            });
+        } catch (error) {
+            console.error('Error creating food place:', error);
+            throw error;
         }
-
-        delete data.id;
-        delete data.createdAt;
-        delete data.updatedAt;
-        delete data.story; // From older frontend version
-
-        // Handle numeric and boolean fields from FormData
-        if (data.rating !== undefined && typeof data.rating === 'string') data.rating = parseFloat(data.rating);
-        if (data.isActive !== undefined && typeof data.isActive === 'string') data.isActive = data.isActive === 'true';
-
-        return this.prisma.foodPlace.create({
-            data: data,
-        });
     }
 
     findAll(subCategoryId?: number) {
@@ -60,45 +77,61 @@ export class FoodPlacesService {
     }
 
     async update(id: number, updateFoodPlaceDto: UpdateFoodPlaceDto) {
-        const data: any = { ...updateFoodPlaceDto };
+        try {
+            const data: any = { ...updateFoodPlaceDto };
 
-        // Fetch old record for image deletion
-        const oldRecord = await this.prisma.foodPlace.findUnique({ where: { id } });
+            // Fetch old record for image deletion
+            const oldRecord = await this.prisma.foodPlace.findUnique({ where: { id } });
 
-        if (data.imageUrl && oldRecord?.imageUrl && data.imageUrl !== oldRecord.imageUrl) {
-            await this.uploadService.deleteFile(oldRecord.imageUrl);
-        }
-
-        if (data.backImageUrl && oldRecord?.backImageUrl && data.backImageUrl !== oldRecord.backImageUrl) {
-            await this.uploadService.deleteFile(oldRecord.backImageUrl);
-        }
-
-        if (data.subCategoryId !== undefined) {
-            const subCatId = typeof data.subCategoryId === 'string' ? parseInt(data.subCategoryId, 10) : data.subCategoryId;
-            if (subCatId) {
-                data.subCategory = { connect: { id: subCatId } };
-            } else {
-                delete data.subCategory; // Ensure invalid string is removed if no subCatId
+            if (data.imageUrl && oldRecord?.imageUrl && data.imageUrl !== oldRecord.imageUrl) {
+                await this.uploadService.deleteFile(oldRecord.imageUrl);
             }
-            delete data.subCategoryId;
-        } else {
-            delete data.subCategory; // Explicitly remove any subCategory string passed by FormData
+
+            if (data.backImageUrl && oldRecord?.backImageUrl && data.backImageUrl !== oldRecord.backImageUrl) {
+                await this.uploadService.deleteFile(oldRecord.backImageUrl);
+            }
+
+            if (data.subCategoryId !== undefined) {
+                const subCatId = typeof data.subCategoryId === 'string' ? parseInt(data.subCategoryId, 10) : data.subCategoryId;
+                if (subCatId && !isNaN(subCatId)) {
+                    data.subCategory = { connect: { id: subCatId } };
+                } else {
+                    delete data.subCategory; // Ensure invalid string is removed if no subCatId
+                }
+                delete data.subCategoryId;
+            } else {
+                delete data.subCategory; // Explicitly remove any subCategory string passed by FormData
+            }
+
+            // Remove read-only or invalid fields that might come from frontend's Object.keys() spread
+            delete data.id;
+            delete data.createdAt;
+            delete data.updatedAt;
+            delete data.story; // From older frontend version to prevent crash
+            delete data.createdBy;
+            delete data.updatedBy;
+            delete data.createdById;
+            delete data.updatedById;
+
+            // Handle numeric and boolean fields from FormData
+            if (data.rating !== undefined) {
+                if (typeof data.rating === 'string') {
+                    const parsed = parseFloat(data.rating);
+                    data.rating = isNaN(parsed) ? null : parsed;
+                } else if (isNaN(data.rating)) {
+                    data.rating = null;
+                }
+            }
+            if (data.isActive !== undefined && typeof data.isActive === 'string') data.isActive = data.isActive === 'true';
+
+            return await this.prisma.foodPlace.update({
+                where: { id },
+                data: data,
+            });
+        } catch (error) {
+            console.error('Error updating food place:', error);
+            throw error;
         }
-
-        // Remove read-only or invalid fields that might come from frontend's Object.keys() spread
-        delete data.id;
-        delete data.createdAt;
-        delete data.updatedAt;
-        delete data.story; // From older frontend version to prevent crash
-
-        // Handle numeric and boolean fields from FormData
-        if (data.rating !== undefined && typeof data.rating === 'string') data.rating = parseFloat(data.rating);
-        if (data.isActive !== undefined && typeof data.isActive === 'string') data.isActive = data.isActive === 'true';
-
-        return this.prisma.foodPlace.update({
-            where: { id },
-            data: data,
-        });
     }
 
     remove(id: number) {

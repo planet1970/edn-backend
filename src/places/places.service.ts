@@ -31,8 +31,13 @@ export class PlacesService {
             };
 
             // Explicitly convert rating to number and isActive to boolean
-            if (dataToCreate.rating !== undefined && typeof dataToCreate.rating === 'string') {
-                dataToCreate.rating = parseFloat(dataToCreate.rating);
+            if (dataToCreate.rating !== undefined) {
+                if (typeof dataToCreate.rating === 'string') {
+                    const parsed = parseFloat(dataToCreate.rating);
+                    dataToCreate.rating = isNaN(parsed) ? null : parsed;
+                } else if (isNaN(dataToCreate.rating)) {
+                    dataToCreate.rating = null;
+                }
             }
             if (dataToCreate.isActive !== undefined && typeof dataToCreate.isActive === 'string') {
                 dataToCreate.isActive = dataToCreate.isActive === 'true';
@@ -135,8 +140,13 @@ export class PlacesService {
         };
 
         // Explicitly convert rating to number and isActive to boolean for update
-        if (dataToUpdate.rating !== undefined && typeof dataToUpdate.rating === 'string') {
-            dataToUpdate.rating = parseFloat(dataToUpdate.rating);
+        if (dataToUpdate.rating !== undefined) {
+            if (typeof dataToUpdate.rating === 'string') {
+                const parsed = parseFloat(dataToUpdate.rating);
+                dataToUpdate.rating = isNaN(parsed) ? null : parsed;
+            } else if (isNaN(dataToUpdate.rating)) {
+                dataToUpdate.rating = null;
+            }
         }
         if (dataToUpdate.isActive !== undefined && typeof dataToUpdate.isActive === 'string') {
             dataToUpdate.isActive = dataToUpdate.isActive === 'true';
