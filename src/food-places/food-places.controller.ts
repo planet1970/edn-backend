@@ -13,6 +13,11 @@ export class FoodPlacesController {
         private readonly uploadService: UploadService,
     ) { }
 
+    @Get('test-connection')
+    test() {
+        return { status: 'ok', message: 'FoodPlacesController is reachable' };
+    }
+
     @Post()
     @UseInterceptors(FileFieldsInterceptor([
         { name: 'file', maxCount: 1 },
