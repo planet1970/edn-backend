@@ -58,17 +58,39 @@ export class FoodPlacesService {
     }
 
     async findAll(subCategoryId?: number) {
-        return []; // TEMPORARY FOR TESTING
+        console.log('FoodPlacesService.findAll starting execution for subCategoryId:', subCategoryId);
+        try {
+            const where: any = {};
+            if (subCategoryId) where.subCategoryId = subCategoryId;
+
+            const results = await this.prisma.foodPlace.findMany({
+                where,
+                include: { subCategory: true },
+            });
+            console.log(`FoodPlacesService.findAll success, found ${results.length} items.`);
+            return results;
+        } catch (error) {
+            console.error('CRITICAL ERROR in FoodPlacesService.findAll:', error);
+            // Deep fallback
+            try {
+                const results = await this.prisma.foodPlace.findMany();
+                return results;
+            } catch (innerError) {
+                console.error('DEEP FALLBACK FAILED:', innerError);
+                return [];
+            }
+        }
     }
 
     async findOne(id: number) {
+        console.log('FoodPlacesService.findOne starting for id:', id);
         try {
             return await this.prisma.foodPlace.findUnique({
                 where: { id },
                 include: { subCategory: true },
             });
         } catch (error) {
-            console.error('Error finding food place:', error);
+            console.error('CRITICAL ERROR in FoodPlacesService.findOne:', error);
             return await this.prisma.foodPlace.findUnique({ where: { id } });
         }
     }
