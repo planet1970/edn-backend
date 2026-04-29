@@ -1,6 +1,5 @@
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["driverAdapters"]
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -233,8 +232,9 @@ model FoodPlace {
   slug          String?
   hoursEveryday String?
   backContent   String?
-  frontContent  String?
   description   String?
+  frontContent  String?
+  order         Int         @default(0)
   subCategory   SubCategory @relation(fields: [subCategoryId], references: [id])
 }
 
@@ -345,6 +345,7 @@ model FeaturedAdvertisement {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
   mainCategory String?
+  slogan       String?
 }
 
 model WebGoogleAd {
@@ -407,6 +408,7 @@ model PopularPlaceAdvertisement {
   info2        String?
   category     String?
   mainCategory String?
+  slogan       String?
 }
 
 model WebAboutSection {
@@ -528,7 +530,6 @@ model TempFoodPlace {
   rating        Float?
   storyTitle    String?
   description   String?
-  frontContent  String?
   backContent   String?
   phone         String?
   hoursEveryday String?
@@ -584,6 +585,7 @@ model TempFoodPlace {
   updatedAt     DateTime @updatedAt
   isActive      Boolean  @default(true)
   slug          String?
+  frontContent  String?
   updatedBy     User?    @relation("TempFoodPlaceUpdatedBy", fields: [updatedById], references: [id])
 }
 
@@ -604,4 +606,16 @@ model WebNewsItem {
   isManual       Boolean   @default(false)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+}
+
+model DailyVisitStats {
+  id          Int      @id @default(autoincrement())
+  date        DateTime @unique
+  webCount    Int      @default(0)
+  mobileCount Int      @default(0)
+  totalCount  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  uniqueCount Int      @default(0)
+  searchCount Int      @default(0)
 }

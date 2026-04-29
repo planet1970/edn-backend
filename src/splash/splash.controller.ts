@@ -38,11 +38,7 @@ export class SplashController {
                 logoUrl: body.logoUrl,
             };
 
-            if (file) {
-                data.logoUrl = await this.uploadService.handleFile(file, 'main');
-            }
-
-            const result = await this.splashService.update(data);
+            const result = await this.splashService.update(data, file);
             return res.status(HttpStatus.OK).json(result);
         } catch (error) {
             return res.status(HttpStatus.BAD_REQUEST).json({ message: error.message });

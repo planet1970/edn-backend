@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, UseGuards } from '@nestjs/common';
 import { StatsService } from './stats.service';
 import { AuthGuard } from '@nestjs/passport';
 
@@ -10,5 +10,14 @@ export class StatsController {
     @Get('dashboard')
     getDashboardStats() {
         return this.statsService.getDashboardStats();
+    }
+
+    @Post('visit')
+    incrementVisit(
+        @Body('platform') platform: 'web' | 'mobile',
+        @Body('isUnique') isUnique: boolean,
+        @Body('isSearch') isSearch: boolean
+    ) {
+        return this.statsService.incrementDailyVisit(platform || 'web', !!isUnique, !!isSearch);
     }
 }

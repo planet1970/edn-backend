@@ -97,4 +97,15 @@ export class CategoriesService {
     const count = await this.prisma.category.count();
     return count + 1;
   }
+
+  async reorder(ids: number[]) {
+    return Promise.all(
+      ids.map((id, index) =>
+        this.prisma.category.update({
+          where: { id },
+          data: { order: index + 1 }
+        })
+      )
+    );
+  }
 }

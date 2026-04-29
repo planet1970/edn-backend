@@ -2,11 +2,13 @@ import { Injectable, BadRequestException } from '@nestjs/common';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as sharp from 'sharp';
 
 @Injectable()
 export class UploadService {
-    private readonly MAX_SIZE = 2 * 1024 * 1024; // 2MB
+    private readonly MAX_SIZE = 5 * 1024 * 1024; // 5MB limit
     private readonly ALLOWED_MIMETYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    private readonly MAX_WIDTH = 1200; // Standardize image width
 
     constructor(private readonly cloudinaryService: CloudinaryService) { }
 
@@ -23,59 +25,66 @@ export class UploadService {
     async handleFile(
         file: Express.Multer.File,
         folder: string,
+        oldUrl?: string // Optional: provide old URL to delete it automatically
     ): Promise<string> {
-        if (!file) return '';
+        if (!file) return oldUrl || '';
+
+        // Safely delete old file if provided
+        if (oldUrl) {
+            await this.deleteFile(oldUrl);
+        }
 
         this.validateFile(file);
 
-        const useCloudinary = process.env.NODE_ENV === 'production' || !!process.env.CLOUDINARY_CLOUD_NAME;
+        // Cloudinary devre dışı bırakıldı - Sadece sunucu üzerindeki yerel disk kullanılacak
 
-        if (useCloudinary) {
-            const result = await this.cloudinaryService.uploadImage(file, folder);
-            return result.secure_url;
-        }
-
-        // Local development
+        // Local development / Local hosting
         const uploadPath = path.join(process.cwd(), 'uploads', folder);
         if (!fs.existsSync(uploadPath)) {
             fs.mkdirSync(uploadPath, { recursive: true });
         }
 
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-        const fileName = `${uniqueSuffix}${path.extname(file.originalname)}`;
+        const fileName = `${uniqueSuffix}${path.extname(file.originalname).toLowerCase()}`;
         const filePath = path.join(uploadPath, fileName);
 
-        fs.writeFileSync(filePath, file.buffer);
+        try {
+            // Optimization: Resize large images using sharp
+            let processor = sharp(file.buffer);
+            const metadata = await processor.metadata();
+
+            if (metadata.width && metadata.width > this.MAX_WIDTH) {
+                processor = processor.resize(this.MAX_WIDTH);
+            }
+
+            // Convert to webp if it's large? Or keep original extension.
+            // Let's keep original for now but high compression.
+            await processor
+                .jpeg({ quality: 80, mozjpeg: true })
+                .toFile(filePath);
+
+        } catch (error) {
+            console.error('Sharp processing error, falling back to original:', error);
+            fs.writeFileSync(filePath, file.buffer);
+        }
 
         return `/uploads/${folder}/${fileName}`;
     }
 
     async deleteFile(fileUrl: string): Promise<void> {
-        if (!fileUrl) return;
+        if (!fileUrl || fileUrl.startsWith('http')) return; // Skip external urls (Cloudinary/fallback)
 
         try {
-            const isCloudinary = !!process.env.CLOUDINARY_CLOUD_NAME || fileUrl.includes('cloudinary.com');
-
-            if (isCloudinary) {
-                const urlParts = fileUrl.split('/');
-                const fileNameWithExt = urlParts[urlParts.length - 1];
-                const publicIdWithoutExt = fileNameWithExt.split('.')[0];
-                const folder = urlParts[urlParts.length - 2];
-                const publicId = `${folder}/${publicIdWithoutExt}`;
-
-                await this.cloudinaryService.deleteImage(publicId);
-                return;
-            }
-
             // Local development
             const relativePath = fileUrl.replace(/^\//, '');
             const filePath = path.join(process.cwd(), relativePath);
 
             if (fs.existsSync(filePath)) {
                 fs.unlinkSync(filePath);
+                console.log(`Successfully deleted file: ${filePath}`);
             }
         } catch (error) {
-            console.error('File deletion error:', error);
+            console.warn('File deletion failed (ignoring):', error);
         }
     }
-}
+}

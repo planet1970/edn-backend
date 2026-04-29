@@ -9,12 +9,16 @@ import { Response } from 'express';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { RoleGuard } from '../auth/guards/role.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { UploadService } from '../common/upload/upload.service';
 // Roles are passed as strings now
 
 @ApiTags('Users')
 @Controller('users')
 export class UsersController {
-    constructor(private readonly usersService: UsersService) { }
+    constructor(
+        private readonly usersService: UsersService,
+        private readonly uploadService: UploadService
+    ) { }
 
     @Get()
     @UseGuards(AuthGuard('jwt'), RoleGuard)
@@ -58,17 +62,7 @@ export class UsersController {
     @Post('avatar')
     @UseGuards(AuthGuard('jwt'))
     @ApiBearerAuth()
-    @UseInterceptors(
-        FileInterceptor('file', {
-            storage: diskStorage({
-                destination: './uploads/users',
-                filename: (req, file, cb) => {
-                    const randomName = uuid();
-                    cb(null, `${randomName}${extname(file.originalname)}`);
-                },
-            }),
-        }),
-    )
+    @UseInterceptors(FileInterceptor('file'))
     @ApiOperation({ summary: 'Profil resmi yükle' })
     async uploadAvatar(@UploadedFile() file: Express.Multer.File, @Req() req: any, @Res() res: Response) {
         if (!file) {
@@ -76,7 +70,9 @@ export class UsersController {
         }
 
         const userId = req.user.userId;
-        const imageUrl = `/uploads/users/${file.filename}`;
+        const existing = await this.usersService.findOneById(userId);
+        
+        const imageUrl = await this.uploadService.handleFile(file, 'users', existing?.imageUrl);
 
         await this.usersService.update(userId, { imageUrl });
 

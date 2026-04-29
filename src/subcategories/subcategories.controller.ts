@@ -38,15 +38,9 @@ export class SubcategoriesController {
         @Res() res: Response
     ) {
         try {
-            if (file) {
-                createSubcategoryDto.imageUrl = await this.uploadService.handleFile(
-                    file,
-                    "subcategories"
-                );
-            }
-
             const subcategory = await this.subcategoriesService.create(
-                createSubcategoryDto
+                createSubcategoryDto,
+                file
             );
 
             return res.status(HttpStatus.CREATED).json(subcategory);
@@ -68,6 +62,11 @@ export class SubcategoriesController {
         return this.subcategoriesService.findOne(+id);
     }
 
+    @Patch('reorder')
+    reorder(@Body('ids') ids: number[]) {
+        return this.subcategoriesService.reorder(ids);
+    }
+
     @Patch(":id")
     @UseGuards(AuthGuard("jwt"), RoleGuard)
     @Roles('ADMIN')
@@ -86,15 +85,10 @@ export class SubcategoriesController {
         @Res() res: Response
     ) {
         try {
-            if (file) {
-                updateSubcategoryDto.imageUrl = await this.uploadService.handleFile(
-                    file,
-                    "subcategories"
-                );
-            }
             const subcategory = await this.subcategoriesService.update(
                 +id,
-                updateSubcategoryDto
+                updateSubcategoryDto,
+                file
             );
             return res.status(HttpStatus.OK).json(subcategory);
         } catch (error) {
@@ -107,7 +101,7 @@ export class SubcategoriesController {
     @Delete(":id")
     @UseGuards(AuthGuard("jwt"), RoleGuard)
     @Roles('ADMIN')
-    async remove(@Param("id") id: string) {
+    remove(@Param('id') id: string) {
         return this.subcategoriesService.remove(+id);
     }
 }

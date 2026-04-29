@@ -115,10 +115,7 @@ export class WebHomeService {
         let imageUrl = updateDto.imageUrl || slide.imageUrl;
 
         if (file) {
-            if (slide.imageUrl) {
-                await this.uploadService.deleteFile(slide.imageUrl);
-            }
-            imageUrl = await this.uploadService.handleFile(file, 'hero');
+            imageUrl = await this.uploadService.handleFile(file, 'hero', slide.imageUrl);
         }
 
         return this.prisma.webHeroSlide.update({
@@ -134,6 +131,8 @@ export class WebHomeService {
     async removeHero(id: string) {
         const slide = await this.prisma.webHeroSlide.findUnique({ where: { id } });
         if (!slide) throw new NotFoundException('Hero slide not found');
+
+        if (slide.imageUrl) await this.uploadService.deleteFile(slide.imageUrl);
 
         return this.prisma.webHeroSlide.delete({ where: { id } });
     }
@@ -200,6 +199,7 @@ export class WebHomeService {
                 where: { id: existing.id },
                 data: {
                     ...data,
+                    logoUrl: file ? await this.uploadService.handleFile(file, 'logo', existing.logoUrl) : logoUrl,
                     updatedAt: new Date()
                 }
             });
@@ -207,6 +207,7 @@ export class WebHomeService {
             return this.prisma.webNavbar.create({
                 data: {
                     ...data,
+                    logoUrl: file ? await this.uploadService.handleFile(file, 'logo') : logoUrl,
                 }
             });
         }
@@ -221,10 +222,15 @@ export class WebHomeService {
     }
 
     async createStoryAd(dto: any) {
+        const lastItem = await this.prisma.storyAdvertisement.findFirst({
+            orderBy: { order: 'desc' }
+        });
+        const nextOrder = (lastItem?.order || 0) + 1;
+
         return this.prisma.storyAdvertisement.create({
             data: {
                 ...dto,
-                order: Number(dto.order || 0),
+                order: dto.order ? Number(dto.order) : nextOrder,
                 isNew: dto.isNew === 'true' || dto.isNew === true,
             }
         });
@@ -249,6 +255,8 @@ export class WebHomeService {
     }
 
     async removeStoryAd(id: number) {
+        const ad = await this.prisma.storyAdvertisement.findUnique({ where: { id } });
+        if (ad?.imageUrl) await this.uploadService.deleteFile(ad.imageUrl);
         return this.prisma.storyAdvertisement.delete({ where: { id } });
     }
 
@@ -272,10 +280,15 @@ export class WebHomeService {
     }
 
     async createFeaturedAd(dto: any) {
+        const lastItem = await this.prisma.featuredAdvertisement.findFirst({
+            orderBy: { order: 'desc' }
+        });
+        const nextOrder = (lastItem?.order || 0) + 1;
+
         return this.prisma.featuredAdvertisement.create({
             data: {
                 ...dto,
-                order: Number(dto.order || 0),
+                order: dto.order ? Number(dto.order) : nextOrder,
                 rating: dto.rating ? Number(dto.rating) : 0,
             }
         });
@@ -300,6 +313,8 @@ export class WebHomeService {
     }
 
     async removeFeaturedAd(id: number) {
+        const ad = await this.prisma.featuredAdvertisement.findUnique({ where: { id } });
+        if (ad?.imageUrl) await this.uploadService.deleteFile(ad.imageUrl);
         return this.prisma.featuredAdvertisement.delete({ where: { id } });
     }
 
@@ -387,10 +402,15 @@ export class WebHomeService {
     }
 
     async createPopularAd(dto: any) {
+        const lastItem = await this.prisma.popularPlaceAdvertisement.findFirst({
+            orderBy: { order: 'desc' }
+        });
+        const nextOrder = (lastItem?.order || 0) + 1;
+
         return this.prisma.popularPlaceAdvertisement.create({
             data: {
                 ...dto,
-                order: Number(dto.order || 0),
+                order: dto.order ? Number(dto.order) : nextOrder,
                 rating: dto.rating ? Number(dto.rating) : 0,
                 visitCount: dto.visitCount ? Number(dto.visitCount) : 0,
             }
@@ -410,6 +430,8 @@ export class WebHomeService {
     }
 
     async removePopularAd(id: number) {
+        const ad = await this.prisma.popularPlaceAdvertisement.findUnique({ where: { id } });
+        if (ad?.imageUrl) await this.uploadService.deleteFile(ad.imageUrl);
         return this.prisma.popularPlaceAdvertisement.delete({ where: { id } });
     }
 
@@ -609,7 +631,7 @@ export class WebHomeService {
                 linkUrl: dto.linkUrl !== undefined ? dto.linkUrl : existing.linkUrl,
                 isActive: dto.isActive !== undefined ? (String(dto.isActive) === 'true' || dto.isActive === true || dto.isActive === 1 || dto.isActive === '1') : existing.isActive,
                 displayStrategy: dto.displayStrategy !== undefined ? dto.displayStrategy : existing.displayStrategy,
-                imageUrl
+                imageUrl: file ? await this.uploadService.handleFile(file, 'ads', existing.imageUrl) : imageUrl
             }
         });
     }

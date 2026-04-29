@@ -10,6 +10,12 @@ export class UsersService {
     private readonly uploadService: UploadService,
   ) { }
 
+  async findOneById(id: number): Promise<User | null> {
+    return (this.prisma as any).user.findUnique({
+      where: { id },
+    });
+  }
+
   async findOne(email: string): Promise<User | null> {
     return (this.prisma as any).user.findUnique({
       where: { email },
@@ -27,13 +33,6 @@ export class UsersService {
   }
 
   async update(id: number, data: Prisma.UserUpdateInput): Promise<User> {
-    // Fetch old record for image deletion
-    const oldRecord = await (this.prisma as any).user.findUnique({ where: { id } });
-
-    if (data.imageUrl && oldRecord?.imageUrl && data.imageUrl !== oldRecord.imageUrl) {
-      await this.uploadService.deleteFile(oldRecord.imageUrl);
-    }
-
     return (this.prisma as any).user.update({
       where: { id },
       data,
@@ -48,23 +47,24 @@ export class UsersService {
         visitor: true
       }
     });
-    return users.map((user: any) => {
-      const mapped = {
-        ...user,
-        fullName: user.name || '',
-        name: user.name || '',
-        roleId: user.roleId,
-        roleName: user.role?.title || user.roleId,
-        visitCount: user.visitor?.visitCount || 0,
-        lastVisitAt: user.visitor?.lastVisitAt || null,
-        fingerprint: user.visitorId,
-        ip: user.visitor?.lastIp || '',
-      };
-      return mapped;
-    });
+    return users.map((user: any) => ({
+      ...user,
+      fullName: user.name || '',
+      name: user.name || '',
+      roleId: user.roleId,
+      roleName: user.role?.title || user.roleId,
+      visitCount: user.visitor?.visitCount || 0,
+      lastVisitAt: user.visitor?.lastVisitAt || null,
+      fingerprint: user.visitorId,
+      ip: user.visitor?.lastIp || '',
+    }));
   }
 
   async remove(id: number): Promise<User> {
+    const existing = await this.findOneById(id);
+    if (existing?.imageUrl) {
+      await this.uploadService.deleteFile(existing.imageUrl);
+    }
     return (this.prisma as any).user.delete({
       where: { id },
     });

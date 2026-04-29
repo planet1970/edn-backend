@@ -39,11 +39,7 @@ export class OnboardingController {
                 order: body.order ? parseInt(body.order, 10) : 0,
             };
 
-            if (file) {
-                data.imageUrl = await this.uploadService.handleFile(file, 'main');
-            }
-
-            const result = await this.onboardingService.create(data);
+            const result = await this.onboardingService.create(data, file);
             return res.status(HttpStatus.CREATED).json(result);
         } catch (error) {
             return res.status(HttpStatus.BAD_REQUEST).json({ message: error.message });
@@ -74,11 +70,7 @@ export class OnboardingController {
                 data.imageUrl = body.imageUrl;
             }
 
-            if (file) {
-                data.imageUrl = await this.uploadService.handleFile(file, 'main');
-            }
-
-            const result = await this.onboardingService.update(id, data);
+            const result = await this.onboardingService.update(id, data, file);
             return res.status(HttpStatus.OK).json(result);
         } catch (error) {
             return res.status(HttpStatus.BAD_REQUEST).json({ message: error.message });

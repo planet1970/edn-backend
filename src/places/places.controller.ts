@@ -35,6 +35,11 @@ export class PlacesController {
         return this.placesService.findOne(id);
     }
 
+    @Patch('reorder')
+    reorder(@Body('ids') ids: number[]) {
+        return this.placesService.reorder(ids.map(id => +id));
+    }
+
     @Patch(':id')
     @UseInterceptors(AnyFilesInterceptor({
         storage: multerStorage
@@ -48,7 +53,7 @@ export class PlacesController {
     }
 
     @Delete(':id')
-    remove(@Param('id', ParseIntPipe) id: number) {
+    remove(@Param('id') id: string) {
         return this.placesService.remove(id);
     }
 }

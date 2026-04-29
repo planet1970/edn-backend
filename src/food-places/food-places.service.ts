@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { CreateFoodPlaceDto } from './dto/create-food-place.dto';
 import { UpdateFoodPlaceDto } from './dto/update-food-place.dto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -66,6 +66,7 @@ export class FoodPlacesService {
             const results = await this.prisma.foodPlace.findMany({
                 where,
                 include: { subCategory: true },
+                orderBy: { order: 'asc' }
             });
             console.log(`FoodPlacesService.findAll success, found ${results.length} items.`);
             return results;
@@ -95,19 +96,18 @@ export class FoodPlacesService {
         }
     }
 
-    async update(id: number, updateFoodPlaceDto: UpdateFoodPlaceDto) {
+    async update(id: number, updateFoodPlaceDto: UpdateFoodPlaceDto, file?: Express.Multer.File, backFile?: Express.Multer.File) {
         try {
+            const existing = await this.prisma.foodPlace.findUnique({ where: { id } });
+            if (!existing) throw new NotFoundException('Food place not found');
+
             const data: any = { ...updateFoodPlaceDto };
 
-            // Fetch old record for image deletion
-            const oldRecord = await this.prisma.foodPlace.findUnique({ where: { id } });
-
-            if (data.imageUrl && oldRecord?.imageUrl && data.imageUrl !== oldRecord.imageUrl) {
-                await this.uploadService.deleteFile(oldRecord.imageUrl);
+            if (file) {
+                data.imageUrl = await this.uploadService.handleFile(file, 'foods', existing.imageUrl);
             }
-
-            if (data.backImageUrl && oldRecord?.backImageUrl && data.backImageUrl !== oldRecord.backImageUrl) {
-                await this.uploadService.deleteFile(oldRecord.backImageUrl);
+            if (backFile) {
+                data.backImageUrl = await this.uploadService.handleFile(backFile, 'foods', existing.backImageUrl);
             }
 
             if (data.subCategoryId !== undefined) {
@@ -115,18 +115,18 @@ export class FoodPlacesService {
                 if (subCatId && !isNaN(subCatId)) {
                     data.subCategory = { connect: { id: subCatId } };
                 } else {
-                    delete data.subCategory; // Ensure invalid string is removed if no subCatId
+                    delete data.subCategory;
                 }
                 delete data.subCategoryId;
             } else {
-                delete data.subCategory; // Explicitly remove any subCategory string passed by FormData
+                delete data.subCategory;
             }
 
-            // Remove read-only or invalid fields that might come from frontend's Object.keys() spread
+            // Remove read-only or invalid fields
             delete data.id;
             delete data.createdAt;
             delete data.updatedAt;
-            delete data.story; // From older frontend version to prevent crash
+            delete data.story; 
             delete data.createdBy;
             delete data.updatedBy;
             delete data.createdById;
@@ -153,9 +153,28 @@ export class FoodPlacesService {
         }
     }
 
-    remove(id: number) {
+    async remove(id: number) {
+        const existing = await this.prisma.foodPlace.findUnique({ where: { id } });
+        if (!existing) throw new NotFoundException('Food place not found');
+
+        // Cleanup files
+        if (existing.imageUrl) await this.uploadService.deleteFile(existing.imageUrl);
+        if (existing.backImageUrl) await this.uploadService.deleteFile(existing.backImageUrl);
+        if (existing.campaignUrl) await this.uploadService.deleteFile(existing.campaignUrl);
+
         return this.prisma.foodPlace.delete({
             where: { id },
         });
+    }
+
+    async reorder(ids: number[]) {
+        return this.prisma.$transaction(
+            ids.map((id, index) =>
+                this.prisma.foodPlace.update({
+                    where: { id },
+                    data: { order: index + 1 },
+                })
+            )
+        );
     }
 }

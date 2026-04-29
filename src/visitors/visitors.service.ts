@@ -1,5 +1,5 @@
 
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 
@@ -130,70 +130,117 @@ export class VisitorsService {
         };
     }
 
-    async upgradeToUser(data: { name: string, email: string, username: string, password?: string, phone?: string, visitorId: string, imageUrl?: string, isEdirnelim?: boolean | string }) {
-        // Convert isEdirnelim to boolean if it comes as string
-        const isEdirnelim = data.isEdirnelim === true || data.isEdirnelim === 'true';
+    async upgradeToUser(data: { name: string, email: string, username: string, password?: string, phone?: string, visitorId: string, imageUrl?: string, isEdirnelim?: boolean | string, googleId?: string }) {
+        console.log('--- UpgradeToUser Request Data ---', data);
+        
+        try {
+            // Validation check
+            if (!data.email || data.email === 'undefined') {
+                console.error('Upgrade failed: Missing email', { data });
+                throw new BadRequestException('E-posta adresi zorunludur.');
+            }
 
-        // Check if user already exists by email
-        let user = await this.prisma.user.findUnique({ where: { email: data.email } });
+            if (!data.username || data.username === 'undefined') {
+                console.error('Upgrade failed: Missing username', { data });
+                throw new BadRequestException('Kullanıcı adı zorunludur.');
+            }
 
-        // Also check if username is taken by another user
-        const usernameExists = await this.prisma.user.findUnique({ where: { username: data.username } });
-        if (usernameExists && (!user || usernameExists.id !== user.id)) {
-            throw new Error('Bu kullanıcı adı zaten alınmış.');
-        }
+            if (!data.visitorId || data.visitorId === 'undefined') {
+                console.error('Upgrade failed: Missing visitorId', { data });
+                throw new BadRequestException('Ziyaretçi kimliği bulunamadı.');
+            }
 
-        let hashedPassword = undefined;
-        if (data.password) {
-            hashedPassword = await bcrypt.hash(data.password, 10);
-        }
+            // Convert isEdirnelim to boolean if it comes as string (FormData sends everything as string)
+            const isEdirnelim = data.isEdirnelim === true || data.isEdirnelim === 'true';
+            console.log('Converted isEdirnelim:', isEdirnelim);
 
-        if (user) {
-            // Update existing user with visitorId if not set
-            const updatedUser = await this.prisma.user.update({
-                where: { id: user.id },
-                data: {
-                    name: data.name,
-                    username: data.username,
-                    password: hashedPassword || user.password,
-                    phone: data.phone,
-                    imageUrl: data.imageUrl || user.imageUrl,
-                    isEdirnelim: isEdirnelim,
-                    visitorId: data.visitorId
+            // Check if email is already taken by ANOTHER visitor/user
+            let user = await this.prisma.user.findUnique({ where: { email: data.email } });
+            console.log('Existing user by email:', user ? user.id : 'none');
+            
+            if (user && user.visitorId && user.visitorId !== data.visitorId) {
+                throw new ConflictException('Bu e-posta adresi zaten başka bir hesap tarafından kullanılıyor.');
+            }
+
+            // Check if username is already taken by ANOTHER visitor/user
+            const userByUsername = await this.prisma.user.findUnique({ where: { username: data.username } });
+            console.log('Existing user by username:', userByUsername ? userByUsername.id : 'none');
+            
+            if (userByUsername && userByUsername.visitorId !== data.visitorId) {
+                throw new ConflictException('Bu kullanıcı adı zaten başka bir üye tarafından kullanılıyor.');
+            }
+
+            // Also check if username is used in a visitor record that NO user has claimed yet
+            const visitorByUsername = await this.prisma.visitor.findUnique({ where: { username: data.username } });
+            if (visitorByUsername && visitorByUsername.fingerprint !== data.visitorId) {
+                const linkedUser = await this.prisma.user.findUnique({ where: { visitorId: visitorByUsername.fingerprint } });
+                if (linkedUser) {
+                    throw new ConflictException('Bu kullanıcı adı zaten alınmış.');
                 }
-            });
+            }
 
-            // Update visitor record to match User identity
-            await this.prisma.visitor.update({
-                where: { fingerprint: data.visitorId },
-                data: { username: data.username }
-            });
+            let hashedPassword = undefined;
+            if (data.password && data.password.trim() !== '' && data.password !== 'undefined') {
+                hashedPassword = await bcrypt.hash(data.password, 10);
+            }
 
-            return updatedUser;
-        } else {
-            // Create new user linked to visitor
-            const newUser = await this.prisma.user.create({
-                data: {
-                    email: data.email,
-                    username: data.username,
-                    password: hashedPassword,
-                    name: data.name,
-                    phone: data.phone,
-                    imageUrl: data.imageUrl,
-                    isEdirnelim: isEdirnelim,
-                    visitorId: data.visitorId,
-                    roleId: 'USER',
-                    isActive: true
-                } as any
-            });
+            if (user) {
+                console.log('Updating existing user:', user.id);
+                // Update existing user with visitorId if not set
+                const updatedUser = await this.prisma.user.update({
+                    where: { id: user.id },
+                    data: {
+                        name: data.name || user.name,
+                        username: data.username,
+                        password: hashedPassword || user.password,
+                        phone: data.phone || user.phone,
+                        imageUrl: data.imageUrl || user.imageUrl,
+                        isEdirnelim: isEdirnelim,
+                        visitorId: data.visitorId,
+                        googleId: data.googleId || user.googleId
+                    }
+                });
 
-            // Update visitor record to match User identity
-            await this.prisma.visitor.update({
-                where: { fingerprint: data.visitorId },
-                data: { username: data.username }
-            });
+                // Update visitor record to match User identity
+                await this.prisma.visitor.update({
+                    where: { fingerprint: data.visitorId },
+                    data: { username: data.username }
+                });
 
-            return newUser;
+                return updatedUser;
+            } else {
+                console.log('Creating new user for visitorId:', data.visitorId);
+                // Create new user linked to visitor
+                const newUser = await this.prisma.user.create({
+                    data: {
+                        email: data.email,
+                        username: data.username,
+                        password: hashedPassword,
+                        name: data.name,
+                        phone: data.phone,
+                        imageUrl: data.imageUrl,
+                        isEdirnelim: isEdirnelim,
+                        visitorId: data.visitorId,
+                        roleId: 'USER',
+                        isActive: true,
+                        googleId: data.googleId
+                    } as any
+                });
+
+                // Update visitor record to match User identity
+                await this.prisma.visitor.update({
+                    where: { fingerprint: data.visitorId },
+                    data: { username: data.username }
+                });
+
+                return newUser;
+            }
+        } catch (error) {
+            console.error('CRITICAL ERROR in upgradeToUser:', error);
+            if (error instanceof ConflictException || error instanceof BadRequestException) {
+                throw error;
+            }
+            throw new BadRequestException(`İşlem başarısız: ${error.message}`);
         }
     }
 

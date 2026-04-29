@@ -23,10 +23,15 @@ export class PopularPlacesService {
     }
 
     async create(dto: any) {
+        const lastItem = await this.prisma.popularPlaceAdvertisement.findFirst({
+            orderBy: { order: 'desc' }
+        });
+        const nextOrder = (lastItem?.order || 0) + 1;
+
         return this.prisma.popularPlaceAdvertisement.create({
             data: {
                 ...dto,
-                order: Number(dto.order || 0),
+                order: dto.order ? Number(dto.order) : nextOrder,
                 rating: dto.rating ? Number(dto.rating) : 0,
                 visitCount: dto.visitCount ? Number(dto.visitCount) : 0,
             }

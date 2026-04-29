@@ -95,10 +95,12 @@ export class PlacesService {
         if (slug) where.slug = slug;
         if (subCategoryId) where.subCategoryId = subCategoryId;
 
-        return this.prisma.place.findMany({
+        const results = await this.prisma.place.findMany({
             where,
-            orderBy: { order: 'asc' } as any
+            include: { subCategory: true },
+            orderBy: { order: 'asc' }
         });
+        return results;
     }
 
     async findOne(id: number): Promise<Place | null> {
@@ -119,18 +121,13 @@ export class PlacesService {
 
         let pic_url = updatePlaceDto.pic_url || existingPlace.pic_url;
         if (file) {
-            if (existingPlace.pic_url) {
-                await this.uploadService.deleteFile(existingPlace.pic_url);
-            }
-            pic_url = await this.uploadService.handleFile(file, 'places');
+            // New handleFile will automatically delete the old file if passed as 3rd param
+            pic_url = await this.uploadService.handleFile(file, 'places', existingPlace.pic_url);
         }
 
         let back_pic_url = updatePlaceDto.back_pic_url || existingPlace.back_pic_url;
         if (backFile) {
-            if (existingPlace.back_pic_url) {
-                await this.uploadService.deleteFile(existingPlace.back_pic_url);
-            }
-            back_pic_url = await this.uploadService.handleFile(backFile, 'places');
+            back_pic_url = await this.uploadService.handleFile(backFile, 'places', existingPlace.back_pic_url);
         }
 
         const dataToUpdate: any = {
@@ -183,13 +180,30 @@ export class PlacesService {
         });
     }
 
-    async remove(id: number): Promise<Place> {
-        const existingPlace = await this.prisma.place.findUnique({ where: { id } });
+    async remove(id: string): Promise<Place> {
+        const placeId = parseInt(id, 10);
+        const existingPlace = await this.prisma.place.findUnique({ where: { id: placeId } });
         if (!existingPlace) {
             throw new NotFoundException(`Place with ID ${id} not found`);
         }
+
+        // Cleanup files before deleting record
+        if (existingPlace.pic_url) await this.uploadService.deleteFile(existingPlace.pic_url);
+        if (existingPlace.back_pic_url) await this.uploadService.deleteFile(existingPlace.back_pic_url);
+
         return this.prisma.place.delete({
-            where: { id },
+            where: { id: placeId },
         });
+    }
+
+    async reorder(ids: number[]) {
+        return this.prisma.$transaction(
+            ids.map((id, index) =>
+                this.prisma.place.update({
+                    where: { id },
+                    data: { order: index + 1 },
+                })
+            )
+        );
     }
 }

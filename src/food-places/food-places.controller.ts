@@ -30,18 +30,14 @@ export class FoodPlacesController {
         @UploadedFiles()
         files: { file?: Express.Multer.File[]; back_file?: Express.Multer.File[] },
     ) {
-        if (files.file?.[0]) {
-            createFoodPlaceDto.imageUrl = await this.uploadService.handleFile(
-                files.file[0],
-                'foods',
-            );
-        }
+        const file = files.file?.[0];
+        const backFile = files.back_file?.[0];
 
-        if (files.back_file?.[0]) {
-            createFoodPlaceDto.backImageUrl = await this.uploadService.handleFile(
-                files.back_file[0],
-                'foods',
-            );
+        if (file) {
+            createFoodPlaceDto.imageUrl = await this.uploadService.handleFile(file, 'foods');
+        }
+        if (backFile) {
+            createFoodPlaceDto.backImageUrl = await this.uploadService.handleFile(backFile, 'foods');
         }
 
         return this.foodPlacesService.create(createFoodPlaceDto);
@@ -57,6 +53,11 @@ export class FoodPlacesController {
         return this.foodPlacesService.findOne(+id);
     }
 
+    @Patch('reorder')
+    reorder(@Body('ids') ids: number[]) {
+        return this.foodPlacesService.reorder(ids);
+    }
+
     @Patch(':id')
     @UseInterceptors(FileFieldsInterceptor([
         { name: 'file', maxCount: 1 },
@@ -69,19 +70,9 @@ export class FoodPlacesController {
         @Body() updateFoodPlaceDto: UpdateFoodPlaceDto,
         @UploadedFiles() files: { file?: Express.Multer.File[], back_file?: Express.Multer.File[] }
     ) {
-        if (files?.file?.[0]) {
-            updateFoodPlaceDto.imageUrl = await this.uploadService.handleFile(
-                files.file[0],
-                'foods',
-            );
-        }
-        if (files?.back_file?.[0]) {
-            updateFoodPlaceDto.backImageUrl = await this.uploadService.handleFile(
-                files.back_file[0],
-                'foods',
-            );
-        }
-        return this.foodPlacesService.update(+id, updateFoodPlaceDto);
+        const file = files?.file?.[0];
+        const backFile = files?.back_file?.[0];
+        return this.foodPlacesService.update(+id, updateFoodPlaceDto, file, backFile);
     }
 
     @Delete(':id')

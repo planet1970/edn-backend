@@ -1,10 +1,16 @@
-import { Controller, Get, Post, Body, Req, Ip, UseGuards, Param } from '@nestjs/common';
+import { Controller, Get, Post, Body, Req, Ip, UseGuards, Param, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { VisitorsService } from './visitors.service';
 import { AuthGuard } from '@nestjs/passport';
+import { multerStorage } from '../common/upload/upload.config';
+import { UploadService } from '../common/upload/upload.service';
 
 @Controller('visitors')
 export class VisitorsController {
-    constructor(private readonly visitorsService: VisitorsService) { }
+    constructor(
+        private readonly visitorsService: VisitorsService,
+        private readonly uploadService: UploadService
+    ) { }
 
     @Get('test')
     test() {
@@ -32,7 +38,18 @@ export class VisitorsController {
     }
 
     @Post('upgrade')
-    async upgradeToUser(@Body() body: any) {
+    @UseInterceptors(FileInterceptor('file', { storage: multerStorage }))
+    async upgradeToUser(
+        @Body() body: any,
+        @UploadedFile() file: Express.Multer.File
+    ) {
+        if (file) {
+            try {
+                body.imageUrl = await this.uploadService.handleFile(file, 'profiles');
+            } catch (error) {
+                console.error('Profile image upload failed, continuing without image:', error);
+            }
+        }
         return this.visitorsService.upgradeToUser(body);
     }
 

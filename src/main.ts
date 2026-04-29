@@ -37,17 +37,12 @@ async function bootstrap() {
   // Global Validation Pipe
   app.useGlobalPipes(
     new ValidationPipe({
-      whitelist: false, // Temporarily disabled to check if fields are being stripped
+      whitelist: false,
       transform: true,
     }),
   );
 
-  // Serve static uploads
-  const uploadsPath = join(process.cwd(), 'uploads');
-  console.log(`Serving static assets from: ${uploadsPath}`);
-  app.useStaticAssets(uploadsPath, {
-    prefix: '/uploads',
-  });
+  // Serve static uploads are now handled by ServeStaticModule in AppModule
 
   // Swagger Configuration (API Documentation)
   const config = new DocumentBuilder()

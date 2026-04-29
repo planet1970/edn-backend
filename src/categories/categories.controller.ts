@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Put, Param, Delete, ParseIntPipe, UseInterceptors } from '@nestjs/common';
+import { Controller, Get, Post, Body, Put, Patch, Param, Delete, ParseIntPipe, UseInterceptors } from '@nestjs/common';
 import { CacheInterceptor } from '@nestjs/cache-manager';
 import { CategoriesService } from './categories.service';
 import { CreateCategoryDto, UpdateCategoryDto } from './dto/category.dto';
@@ -38,6 +38,12 @@ export class CategoriesController {
   @ApiOperation({ summary: 'Kategori sil' })
   remove(@Param('id', ParseIntPipe) id: number) {
     return this.categoriesService.remove(id);
+  }
+
+  @Patch('reorder')
+  @ApiOperation({ summary: 'Kategorileri sırala' })
+  reorder(@Body('ids') ids: number[]) {
+    return this.categoriesService.reorder(ids);
   }
 }
 
