@@ -13,71 +13,101 @@ export class MediaController {
 
     @Get('list')
     async listMedia() {
-        const files: any[] = [];
-        this.scanDirectory(this.uploadRoot, files);
-        
-        // Sort by date desc
-        files.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        try {
+            const files: any[] = [];
+            this.scanDirectory(this.uploadRoot, files);
+            
+            // Sort by date desc safely
+            files.sort((a, b) => {
+                const dateA = new Date(a.created_at).getTime() || 0;
+                const dateB = new Date(b.created_at).getTime() || 0;
+                return dateB - dateA;
+            });
 
-        return { resources: files };
+            return { resources: files };
+        } catch (error) {
+            console.error("Media listesi alınırken hata oluştu:", error);
+            return { resources: [] }; // Hata olsa bile 500 dönmemesi için boş liste dönüyoruz
+        }
     }
 
     @Get('stats')
     async getStats() {
-        const files: any[] = [];
-        this.scanDirectory(this.uploadRoot, files);
+        try {
+            const files: any[] = [];
+            this.scanDirectory(this.uploadRoot, files);
 
-        const totalBytes = files.reduce((acc, f) => acc + f.bytes, 0);
-        
-        return {
-            storage: {
-                used: totalBytes,
-                limit: 10 * 1024 * 1024 * 1024 // 10GB Virtual Limit
-            },
-            bandwidth: {
-                used: 0 // Local bandwidth is not tracked
-            }
-        };
+            const totalBytes = files.reduce((acc, f) => acc + (f.bytes || 0), 0);
+            
+            return {
+                storage: {
+                    used: totalBytes,
+                    limit: 10 * 1024 * 1024 * 1024 // 10GB Virtual Limit
+                },
+                bandwidth: {
+                    used: 0
+                }
+            };
+        } catch (error) {
+            console.error("Media istatistikleri alınırken hata oluştu:", error);
+            return {
+                storage: { used: 0, limit: 10 * 1024 * 1024 * 1024 },
+                bandwidth: { used: 0 }
+            };
+        }
     }
 
     @Delete(':path(*)')
     async deleteMedia(@Param('path') filePath: string) {
-        const fullPath = path.join(process.cwd(), filePath.startsWith('/') ? filePath.substring(1) : filePath);
-        
-        // Security check: Must be inside uploads folder
-        if (!fullPath.startsWith(this.uploadRoot)) {
-            throw new Error('Unauthorized deletion path');
-        }
+        try {
+            const fullPath = path.join(process.cwd(), filePath.startsWith('/') ? filePath.substring(1) : filePath);
+            
+            if (!fullPath.startsWith(this.uploadRoot)) {
+                return { success: false, message: 'Unauthorized deletion path' };
+            }
 
-        if (fs.existsSync(fullPath)) {
-            fs.unlinkSync(fullPath);
-            return { success: true };
+            if (fs.existsSync(fullPath)) {
+                fs.unlinkSync(fullPath);
+                return { success: true };
+            }
+            return { success: false, message: 'File not found' };
+        } catch (error) {
+            console.error("Dosya silinirken hata oluştu:", error);
+            return { success: false, message: 'Sunucu hatası oluştu' };
         }
-        return { success: false, message: 'File not found' };
     }
 
     private scanDirectory(dir: string, fileList: any[]) {
-        if (!fs.existsSync(dir)) return;
+        try {
+            if (!fs.existsSync(dir)) return;
 
-        const files = fs.readdirSync(dir);
-        files.forEach(file => {
-            const filePath = path.join(dir, file);
-            const stat = fs.statSync(filePath);
+            const files = fs.readdirSync(dir);
+            files.forEach(file => {
+                const filePath = path.join(dir, file);
+                try {
+                    const stat = fs.statSync(filePath);
 
-            if (stat.isDirectory()) {
-                this.scanDirectory(filePath, fileList);
-            } else {
-                const relativePath = path.relative(process.cwd(), filePath).replace(/\\/g, '/');
-                fileList.push({
-                    public_id: relativePath,
-                    secure_url: `/${relativePath}`,
-                    bytes: stat.size,
-                    created_at: stat.birthtime,
-                    format: path.extname(file).substring(1),
-                    width: 0, // In local mode, we don't store width/height unless we process all files with sharp (slow)
-                    height: 0
-                });
-            }
-        });
+                    if (stat.isDirectory()) {
+                        this.scanDirectory(filePath, fileList);
+                    } else {
+                        const relativePath = path.relative(process.cwd(), filePath).replace(/\\/g, '/');
+                        fileList.push({
+                            public_id: relativePath,
+                            secure_url: `/${relativePath}`,
+                            bytes: stat.size,
+                            // Linux sunucularında birthtime her zaman bulunmaz, mtime (değiştirilme zamanı) daha güvenlidir
+                            created_at: stat.birthtime || stat.mtime || new Date(),
+                            format: path.extname(file).substring(1),
+                            width: 0,
+                            height: 0
+                        });
+                    }
+                } catch (err) {
+                    console.error(`Dosya stat okunamadı: ${filePath}`, err);
+                }
+            });
+        } catch (error) {
+            console.error(`Dizin taranamadı: ${dir}`, error);
+        }
     }
 }
