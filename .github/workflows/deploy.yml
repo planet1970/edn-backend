@@ -52,15 +52,33 @@ jobs:
           password: ${{ secrets.PASSWORD }}
           script: |
             cd /root/edn/backend
-            # Bagımlılıkları kuralım (Prisma generate scripti package.json içinde olmalı)
+            
+            # Yedekleme ve mevcut .env değerlerini koruma
+            GEMINI=""
+            HF=""
+            if [ -f .env ]; then
+              GEMINI=$(grep GEMINI_API_KEY .env | cut -d '=' -f2-)
+              HF=$(grep HUGGINGFACE_API_KEY .env | cut -d '=' -f2-)
+            fi
+            
+            # Bağımlılıkları kuralım
             npm install --production --legacy-peer-deps
             npx prisma generate
             
-            # .env dosyasını TIRNAKSIZ oluşturalım
+            # .env dosyasını oluşturalım ve eski anahtarları koruyalım
             echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" > .env
             echo "JWT_SECRET=${{ secrets.JWT_SECRET }}" >> .env
             
-            # Proje giriş noktasını main.js olarak kontrol edelim ve başlatalım
-            pm2 delete edn-backend || true
-            pm2 start dist/main.js --name "edn-backend"
+            if [ ! -z "$GEMINI" ]; then
+              echo "GEMINI_API_KEY=$GEMINI" >> .env
+            fi
+            if [ ! -z "$HF" ]; then
+              echo "HUGGINGFACE_API_KEY=$HF" >> .env
+            fi
+            
+            # Çakışmaları önlemek için eski ve yeni isimli PM2 servislerini silelim
+            pm2 delete edn-backend edirnego-backend || true
+            
+            # Proje giriş noktasını dist/src/main.js olarak başlatalım
+            pm2 start dist/src/main.js --name "edn-backend"
             pm2 save

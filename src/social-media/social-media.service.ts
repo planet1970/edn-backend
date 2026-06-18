@@ -269,7 +269,7 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
         } else {
           try {
             const response = await fetch(
-              'https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0',
+              'https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell',
               {
                 method: 'POST',
                 headers: {
