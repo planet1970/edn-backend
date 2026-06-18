@@ -11,6 +11,8 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+scratch_query.js
 
 # Editor directories and files
 .vscode/*

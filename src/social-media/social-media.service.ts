@@ -517,6 +517,34 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
       throw new Error('Gönderi bulunamadı.');
     }
 
+    // Set post status to PUBLISHING immediately in the database
+    const updatedPost = await this.prisma.socialMediaPost.update({
+      where: { id },
+      data: {
+        status: 'PUBLISHING',
+        errorMessage: null,
+      },
+    });
+
+    // Run the actual publishing process in the background
+    this.publishPostInBackground(id).catch((err) => {
+      this.logger.error(`Error in background publishPost for post ID ${id}:`, err);
+    });
+
+    return updatedPost;
+  }
+
+  // Actual publishing logic run in the background
+  async publishPostInBackground(id: number) {
+    const post = await this.prisma.socialMediaPost.findUnique({
+      where: { id },
+    });
+
+    if (!post) {
+      this.logger.error(`Post with ID ${id} not found for background publishing.`);
+      return;
+    }
+
     try {
       // Find account for this platform
       const account = await this.prisma.socialMediaAccount.findFirst({
