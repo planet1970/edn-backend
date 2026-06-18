@@ -700,28 +700,28 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
 
             const creationId = containerData.id;
 
-            // Wait for video processing
-            if (videoUrl) {
-              let status = 'IN_PROGRESS';
-              let attempts = 0;
-              const maxAttempts = 12; // 60 seconds max
-              while (status !== 'FINISHED' && attempts < maxAttempts) {
-                await new Promise(resolve => setTimeout(resolve, 5000));
-                const checkRes = await fetch(
-                  `https://graph.facebook.com/v18.0/${creationId}?fields=status_code,status_message&access_token=${accessToken}`
-                );
-                if (checkRes.ok) {
-                  const checkData = await checkRes.json();
-                  status = checkData.status_code || 'IN_PROGRESS';
-                  if (status === 'ERROR') {
-                    throw new Error(`Instagram video işleme hatası: ${checkData.status_message || 'Bilinmeyen hata'}`);
-                  }
+            // Wait for media processing (both image and video)
+            let status = 'IN_PROGRESS';
+            let attempts = 0;
+            const maxAttempts = 15; // 75 seconds max
+            while (status !== 'FINISHED' && attempts < maxAttempts) {
+              await new Promise(resolve => setTimeout(resolve, 5000));
+              const checkRes = await fetch(
+                `https://graph.facebook.com/v18.0/${creationId}?fields=status_code,status_message&access_token=${accessToken}`
+              );
+              if (checkRes.ok) {
+                const checkData = await checkRes.json();
+                status = checkData.status_code || 'FINISHED';
+                if (status === 'ERROR') {
+                  throw new Error(`Instagram medya işleme hatası: ${checkData.status_message || 'Bilinmeyen hata'}`);
                 }
-                attempts++;
+              } else {
+                this.logger.warn(`Instagram container status check failed (status: ${checkRes.status}). Retrying...`);
               }
-              if (status !== 'FINISHED') {
-                throw new Error('Instagram video işleme zaman aşımına uğradı. Lütfen tekrar deneyin.');
-              }
+              attempts++;
+            }
+            if (status !== 'FINISHED') {
+              throw new Error('Instagram medya işleme zaman aşımına uğradı. Lütfen tekrar deneyin.');
             }
 
             // Publish
