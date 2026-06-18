@@ -534,6 +534,16 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
     return updatedPost;
   }
 
+  private async updatePostProgress(id: number, message: string) {
+    this.logger.log(`[Post #${id}] ${message}`);
+    await this.prisma.socialMediaPost.update({
+      where: { id },
+      data: {
+        errorMessage: message,
+      },
+    });
+  }
+
   // Actual publishing logic run in the background
   async publishPostInBackground(id: number) {
     const post = await this.prisma.socialMediaPost.findUnique({
@@ -546,6 +556,8 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
     }
 
     try {
+      await this.updatePostProgress(id, 'Paylaşım başlatıldı, hesap bilgileri sorgulanıyor...');
+
       // Find account for this platform
       const account = await this.prisma.socialMediaAccount.findFirst({
         where: { platform: post.platform, isActive: true },
@@ -557,10 +569,11 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
 
       if (account.isSimulated) {
         // Simulated Publish
+        await this.updatePostProgress(id, 'Simülasyon modunda paylaşılıyor...');
         this.logger.log(`[SIMULATED] Posting to ${post.platform} for account ${account.username}`);
         await new Promise((resolve) => setTimeout(resolve, 1500)); // Simulate network latency
         
-        return this.prisma.socialMediaPost.update({
+        await this.prisma.socialMediaPost.update({
           where: { id },
           data: {
             status: 'PUBLISHED',
@@ -568,8 +581,10 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
             errorMessage: null,
           },
         });
+        return;
       } else {
         // Real API integrations
+        await this.updatePostProgress(id, `${post.platform} API bağlantısı kuruluyor...`);
         this.logger.log(`[REAL] Attempting to publish to ${post.platform} API...`);
         const credentials: any = account.credentials;
         const accessToken = credentials?.accessToken?.trim();
@@ -580,6 +595,7 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
         }
 
         if (post.platform === 'FACEBOOK') {
+          await this.updatePostProgress(id, 'Facebook entegrasyonu başlatıldı...');
           if (!pageId) {
             throw new Error('Sayfa Kimliği (Page ID) eksik. Facebook paylaşımı yapılamadı.');
           }
@@ -604,6 +620,7 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
           const isPublicMedia = (url?: string) => url && url.startsWith('http') && !url.includes('localhost') && !url.includes('127.0.0.1');
 
           if (isPublicMedia(imageUrl)) {
+            await this.updatePostProgress(id, 'Facebook: Görsel gönderisi hazırlanıyor...');
             fbUrl = `https://graph.facebook.com/v18.0/${pageId}/photos`;
             body = {
               url: imageUrl,
@@ -611,14 +628,18 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
               access_token: accessToken,
             };
           } else if (isPublicMedia(videoUrl)) {
+            await this.updatePostProgress(id, 'Facebook: Video gönderisi hazırlanıyor...');
             fbUrl = `https://graph.facebook.com/v18.0/${pageId}/videos`;
             body = {
               file_url: videoUrl,
               description: post.caption,
               access_token: accessToken,
             };
+          } else {
+            await this.updatePostProgress(id, 'Facebook: Metin gönderisi hazırlanıyor...');
           }
 
+          await this.updatePostProgress(id, 'Facebook API\'ye gönderiliyor...');
           const fbResponse = await fetch(fbUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -630,7 +651,7 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
             throw new Error(`Facebook API Hatası: ${fbData?.error?.message || fbResponse.statusText}`);
           }
 
-          return this.prisma.socialMediaPost.update({
+          await this.prisma.socialMediaPost.update({
             where: { id },
             data: {
               status: 'PUBLISHED',
@@ -638,12 +659,15 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
               errorMessage: null,
             },
           });
+          return;
         }
 
         if (post.platform === 'INSTAGRAM') {
+          await this.updatePostProgress(id, 'Instagram entegrasyonu başlatıldı...');
           let instagramBusinessAccountId = credentials?.instagramBusinessAccountId;
           
           if (!instagramBusinessAccountId && pageId) {
+            await this.updatePostProgress(id, 'Instagram Business Account ID sorgulanıyor...');
             // Retrieve instagramBusinessAccountId on the fly
             const pageInfoRes = await fetch(
               `https://graph.facebook.com/v18.0/${pageId}?fields=instagram_business_account&access_token=${accessToken}`
@@ -687,6 +711,7 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
 
           // Helper to publish to Instagram
           const publishToInstagram = async (type: 'POST' | 'STORY') => {
+            await this.updatePostProgress(id, `Instagram: Medya konteyneri oluşturuluyor (${type === 'STORY' ? 'Hikaye' : 'Gönderi'})...`);
             const mediaContainerUrl = `https://graph.facebook.com/v18.0/${instagramBusinessAccountId}/media`;
             const containerBody: any = {
               access_token: accessToken,
@@ -733,6 +758,10 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
             let attempts = 0;
             const maxAttempts = 60; // 5 minutes max
             while (status !== 'FINISHED' && attempts < maxAttempts) {
+              await this.updatePostProgress(
+                id,
+                `Instagram: Medya işleniyor (Deneme ${attempts + 1}/${maxAttempts})...`
+              );
               await new Promise(resolve => setTimeout(resolve, 5000));
               const checkRes = await fetch(
                 `https://graph.facebook.com/v18.0/${creationId}?fields=status_code,status_message&access_token=${accessToken}`
@@ -753,6 +782,7 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
             }
 
             // Publish
+            await this.updatePostProgress(id, `Instagram: Medya yayınlanıyor (${type === 'STORY' ? 'Hikaye' : 'Gönderi'})...`);
             const publishUrl = `https://graph.facebook.com/v18.0/${instagramBusinessAccountId}/media_publish`;
             const publishRes = await fetch(publishUrl, {
               method: 'POST',
@@ -776,7 +806,7 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
             await publishToInstagram(post.postType as 'POST' | 'STORY');
           }
 
-          return this.prisma.socialMediaPost.update({
+          await this.prisma.socialMediaPost.update({
             where: { id },
             data: {
               status: 'PUBLISHED',
@@ -784,6 +814,7 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
               errorMessage: null,
             },
           });
+          return;
         }
 
         // TikTok or others
@@ -791,7 +822,7 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
       }
     } catch (error) {
       this.logger.error(`Gönderi paylaşımında hata (${post.platform}):`, error);
-      return this.prisma.socialMediaPost.update({
+      await this.prisma.socialMediaPost.update({
         where: { id },
         data: {
           status: 'FAILED',
