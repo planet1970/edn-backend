@@ -10,6 +10,14 @@ export class SocialMediaService {
 
   constructor(private prisma: PrismaService) {}
 
+  private getAbsoluteUrl(url?: string): string {
+    if (!url) return '';
+    if (url.startsWith('http')) return url;
+    const baseUrl = (process.env.BACKEND_URL || 'https://api.edirnego.com').replace(/\/$/, '');
+    const cleanUrl = url.startsWith('/') ? url : `/${url}`;
+    return `${baseUrl}${cleanUrl}`;
+  }
+
   // 1. Generate post content using specified AI APIs (or simulated)
   async generatePost(
     prompt: string,
@@ -548,8 +556,11 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
             throw new Error('Sayfa Kimliği (Page ID) eksik. Facebook paylaşımı yapılamadı.');
           }
 
-          const isLocalMedia = (url?: string) => url && (url.startsWith('/') || url.includes('localhost'));
-          if (isLocalMedia(post.imageUrl) || isLocalMedia(post.videoUrl)) {
+          const imageUrl = post.imageUrl ? this.getAbsoluteUrl(post.imageUrl) : null;
+          const videoUrl = post.videoUrl ? this.getAbsoluteUrl(post.videoUrl) : null;
+
+          const isLocalMedia = (url?: string) => url && (url.includes('localhost') || url.includes('127.0.0.1'));
+          if (isLocalMedia(imageUrl) || isLocalMedia(videoUrl)) {
             throw new Error(
               'Görsel veya video yerel sunucuda (localhost) veya veri formatında barındırılıyor. ' +
               'Meta API\'lerinin dosyayı indirebilmesi için internete açık, genel bir URL (örn. ngrok tüneli veya sunucu URL\'si) gereklidir.'
@@ -562,19 +573,19 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
             access_token: accessToken,
           };
 
-          const isPublicMedia = (url?: string) => url && url.startsWith('http') && !url.includes('localhost');
+          const isPublicMedia = (url?: string) => url && url.startsWith('http') && !url.includes('localhost') && !url.includes('127.0.0.1');
 
-          if (isPublicMedia(post.imageUrl)) {
+          if (isPublicMedia(imageUrl)) {
             fbUrl = `https://graph.facebook.com/v18.0/${pageId}/photos`;
             body = {
-              url: post.imageUrl,
+              url: imageUrl,
               message: post.caption,
               access_token: accessToken,
             };
-          } else if (isPublicMedia(post.videoUrl)) {
+          } else if (isPublicMedia(videoUrl)) {
             fbUrl = `https://graph.facebook.com/v18.0/${pageId}/videos`;
             body = {
-              file_url: post.videoUrl,
+              file_url: videoUrl,
               description: post.caption,
               access_token: accessToken,
             };
@@ -635,8 +646,11 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
             );
           }
 
-          const isLocalMedia = (url?: string) => url && (url.startsWith('/') || url.includes('localhost'));
-          if (isLocalMedia(post.imageUrl) || isLocalMedia(post.videoUrl)) {
+          const imageUrl = post.imageUrl ? this.getAbsoluteUrl(post.imageUrl) : null;
+          const videoUrl = post.videoUrl ? this.getAbsoluteUrl(post.videoUrl) : null;
+
+          const isLocalMedia = (url?: string) => url && (url.includes('localhost') || url.includes('127.0.0.1'));
+          if (isLocalMedia(imageUrl) || isLocalMedia(videoUrl)) {
             throw new Error(
               'Görsel veya video yerel sunucuda (localhost) veya veri formatında barındırılıyor. ' +
               'Instagram API\'sinin medyayı indirebilmesi için genel, internete açık bir URL gereklidir.'
@@ -652,21 +666,21 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
 
             if (type === 'STORY') {
               containerBody.media_type = 'STORIES';
-              if (post.videoUrl) {
-                containerBody.video_url = post.videoUrl;
-              } else if (post.imageUrl) {
-                containerBody.image_url = post.imageUrl;
+              if (videoUrl) {
+                containerBody.video_url = videoUrl;
+              } else if (imageUrl) {
+                containerBody.image_url = imageUrl;
               } else {
                 throw new Error('Hikaye paylaşımı için bir görsel veya video gereklidir.');
               }
             } else {
               // Feed Post
-              if (post.videoUrl) {
+              if (videoUrl) {
                 containerBody.media_type = 'REELS';
-                containerBody.video_url = post.videoUrl;
+                containerBody.video_url = videoUrl;
                 containerBody.caption = post.caption;
-              } else if (post.imageUrl) {
-                containerBody.image_url = post.imageUrl;
+              } else if (imageUrl) {
+                containerBody.image_url = imageUrl;
                 containerBody.caption = post.caption;
               } else {
                 throw new Error('Gönderi paylaşımı için en az bir görsel veya video gereklidir.');
@@ -687,7 +701,7 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
             const creationId = containerData.id;
 
             // Wait for video processing
-            if (post.videoUrl) {
+            if (videoUrl) {
               let status = 'IN_PROGRESS';
               let attempts = 0;
               const maxAttempts = 12; // 60 seconds max
