@@ -731,7 +731,7 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
             // Wait for media processing (both image and video)
             let status = 'IN_PROGRESS';
             let attempts = 0;
-            const maxAttempts = 15; // 75 seconds max
+            const maxAttempts = 60; // 5 minutes max
             while (status !== 'FINISHED' && attempts < maxAttempts) {
               await new Promise(resolve => setTimeout(resolve, 5000));
               const checkRes = await fetch(
