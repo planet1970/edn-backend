@@ -619,3 +619,30 @@ model DailyVisitStats {
   uniqueCount Int      @default(0)
   searchCount Int      @default(0)
 }
+
+model SocialMediaAccount {
+  id          Int      @id @default(autoincrement())
+  platform    String   // "INSTAGRAM", "FACEBOOK", "TIKTOK"
+  username    String
+  isActive    Boolean  @default(true)
+  isSimulated Boolean  @default(true)
+  credentials Json     // API keys, token, pageId
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model SocialMediaPost {
+  id           Int       @id @default(autoincrement())
+  platform     String    // "INSTAGRAM", "FACEBOOK", "TIKTOK"
+  prompt       String
+  caption      String
+  imageUrl     String?
+  videoUrl     String?
+  postType     String    @default("POST") // "POST", "STORY", "BOTH"
+  status       String    @default("DRAFT") // "DRAFT", "SCHEDULED", "PUBLISHED", "FAILED"
+  scheduledAt  DateTime?
+  publishedAt  DateTime?
+  errorMessage String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}

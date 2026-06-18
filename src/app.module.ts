@@ -25,6 +25,7 @@ import { PageAuthoritiesModule } from './page-authorities/page-authorities.modul
 import { TempPagesModule } from './temp-pages/temp-pages.module';
 import { MediaModule } from './media/media.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { SocialMediaModule } from './social-media/social-media.module';
 
 @Module({
   imports: [
@@ -66,6 +67,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     PageAuthoritiesModule,
     TempPagesModule,
     MediaModule,
+    SocialMediaModule,
   ],
   controllers: [],
   providers: [],

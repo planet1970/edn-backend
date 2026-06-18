@@ -56,31 +56,19 @@ export class StatsService {
     }
 
     async getDashboardStats() {
-        const [
-            totalUsers,
-            totalCategories,
-            totalSubCategories,
-            totalPlaces,
-            totalFoodPlaces,
-            pendingContactMessages,
-            totalVisitors,
-            topPopupAds,
-            dailyStats
-        ] = await Promise.all([
-            this.prisma.user.count(),
-            this.prisma.category.count(),
-            this.prisma.subCategory.count(),
-            this.prisma.place.count(),
-            this.prisma.foodPlace.count(),
-            this.prisma.contactMessage.count({ where: { status: 'Bekliyor' } }),
-            this.prisma.visitor.count(),
-            this.prisma.webPopupAd.findMany({
-                take: 5,
-                orderBy: { viewCount: 'desc' },
-                select: { id: true, title: true, viewCount: true, imageUrl: true }
-            }),
-            this.getDailyStats(5)
-        ]);
+        const totalUsers = await this.prisma.user.count();
+        const totalCategories = await this.prisma.category.count();
+        const totalSubCategories = await this.prisma.subCategory.count();
+        const totalPlaces = await this.prisma.place.count();
+        const totalFoodPlaces = await this.prisma.foodPlace.count();
+        const pendingContactMessages = await this.prisma.contactMessage.count({ where: { status: 'Bekliyor' } });
+        const totalVisitors = await this.prisma.visitor.count();
+        const topPopupAds = await this.prisma.webPopupAd.findMany({
+            take: 5,
+            orderBy: { viewCount: 'desc' },
+            select: { id: true, title: true, viewCount: true, imageUrl: true }
+        });
+        const dailyStats = await this.getDailyStats(5);
 
         return {
             totalUsers,
