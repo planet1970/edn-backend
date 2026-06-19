@@ -454,11 +454,12 @@ Video promptu (videoPrompt) için kurallar:
       const targetWidth = 1080;
       const targetHeight = 1920;
       
-      // Crop & Resize original image to exactly 1080x1920
+      // Crop & Resize original image to exactly 1080x1920 with top alignment and white background
       const processedBuffer = await sharp(absolutePath)
         .resize(targetWidth, targetHeight, {
-          fit: 'cover',
-          position: 'center',
+          fit: 'contain',
+          position: 'top',
+          background: { r: 255, g: 255, b: 255, alpha: 1 },
         })
         .toBuffer();
       
