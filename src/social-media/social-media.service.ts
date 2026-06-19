@@ -454,14 +454,22 @@ Video promptu (videoPrompt) için kurallar:
       const targetWidth = 1080;
       const targetHeight = 1920;
       
-      // Crop & Resize original image to exactly 1080x1920 with top alignment and white background
-      const processedBuffer = await sharp(absolutePath)
-        .resize(targetWidth, targetHeight, {
-          fit: 'contain',
-          position: 'top',
-          background: { r: 255, g: 255, b: 255, alpha: 1 },
-        })
+      // 1. Resize original image to width 1080 (height scales proportionally)
+      const resizedBuffer = await sharp(absolutePath)
+        .resize({ width: targetWidth })
         .toBuffer();
+
+      // 2. Create a white 1080x1920 canvas and overlay the resized image at the top (overflow gets cropped at 1920)
+      const processedBuffer = await sharp({
+        create: {
+          width: targetWidth,
+          height: targetHeight,
+          channels: 3,
+          background: { r: 255, g: 255, b: 255 }
+        }
+      })
+      .composite([{ input: resizedBuffer, top: 0, left: 0 }])
+      .toBuffer();
       
       // Split text into lines (max 28 characters per line)
       const words = text.split(/\s+/);
