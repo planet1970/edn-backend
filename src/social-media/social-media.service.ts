@@ -29,6 +29,7 @@ export class SocialMediaService {
     videoProvider: string = 'simulation',
     includeImage: boolean = false,
     includeVideo: boolean = false,
+    postType: string = 'POST',
   ) {
     const logs: string[] = [];
     let caption = '';
@@ -40,12 +41,16 @@ export class SocialMediaService {
     let imageProviderUsed = imageProvider;
     let videoProviderUsed = videoProvider;
 
+    const isStory = postType === 'STORY';
+
     // System instruction for Text AIs
     const systemInstruction = `Sen profesyonel bir sosyal medya içerik üreticisisin. 
 Kullanıcının belirteceği konu veya prompt doğrultusunda, belirtilen platform ve ses tonuna uygun, dikkat çekici, emojilerle zenginleştirilmiş ve popüler hashtag'leri içeren bir paylaşım yazısı hazırla.
 
 Paylaşım yazısı için kurallar:
-1. Konu hakkında mümkün olduğunca az bilinen, şaşırtıcı ve ilgi çekici tarihi/kültürel detaylara yer ver. Eğer spesifik bir konu isteniyorsa, o konuyla ilgili derinlemesine ilginç ve detaylı bilgiler sun.
+1. ${isStory 
+     ? 'Hedef paylaşım türü HİKAYE (STORY) olduğu için paylaşım metni (caption) SON DERECE KISA, ÖZ VE VURUCU OLMALIDIR. Sadece 1 veya 2 çarpıcı slogan/cümle (en fazla 10-15 kelime) yaz. Kesinlikle uzun paragraflar, açıklamalar yazma.'
+     : 'Konu hakkında mümkün olduğunca az bilinen, şaşırtıcı ve ilgi çekici tarihi/kültürel detaylara yer ver. Eğer spesifik bir konu isteniyorsa, o konuyla ilgili derinlemesine ilginç ve detaylı bilgiler sun.'}
 2. Paylaşımın sonuna kesinlikle "yorumlar kısmında buluşalım", "yorumlar da buluşalım", "yorumlarınızı bekliyorum" veya benzeri yorum yapma çağrıları (call-to-action) ekleme.
 
 Görsel promptu (imagePrompt) için kurallar:

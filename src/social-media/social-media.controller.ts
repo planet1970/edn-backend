@@ -22,6 +22,7 @@ export class SocialMediaController {
       videoProvider?: string;
       includeImage?: boolean;
       includeVideo?: boolean;
+      postType?: string;
     },
   ) {
     return this.socialMediaService.generatePost(
@@ -32,7 +33,8 @@ export class SocialMediaController {
       body.imageProvider,
       body.videoProvider,
       body.includeImage,
-      body.includeVideo
+      body.includeVideo,
+      body.postType
     );
   }
 
