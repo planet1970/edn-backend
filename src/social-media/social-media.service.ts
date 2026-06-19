@@ -442,12 +442,41 @@ Video promptu (videoPrompt) için kurallar:
     if (!relativeImagePath) return null;
     
     try {
-      const cleanPath = relativeImagePath.startsWith('/') ? relativeImagePath.substring(1) : relativeImagePath;
-      const absolutePath = path.join(process.cwd(), cleanPath);
-      
-      if (!fs.existsSync(absolutePath)) {
-        this.logger.warn(`Görsel bulunamadı: ${absolutePath}`);
-        return null;
+      let imageBuffer: Buffer;
+      let outputAbsolutePath: string;
+      let relativeOutputDir: string;
+      let outputFilename: string;
+
+      if (relativeImagePath.startsWith('http://') || relativeImagePath.startsWith('https://')) {
+        const response = await fetch(relativeImagePath);
+        if (!response.ok) {
+          throw new Error(`Uzaktaki görsel indirilemedi: ${response.statusText}`);
+        }
+        imageBuffer = Buffer.from(await response.arrayBuffer());
+
+        const uploadDir = path.join(process.cwd(), 'uploads');
+        if (!fs.existsSync(uploadDir)) {
+          fs.mkdirSync(uploadDir, { recursive: true });
+        }
+        outputFilename = `story-overlay-${Date.now()}.png`;
+        outputAbsolutePath = path.join(uploadDir, outputFilename);
+        relativeOutputDir = 'uploads';
+      } else {
+        const cleanPath = relativeImagePath.startsWith('/') ? relativeImagePath.substring(1) : relativeImagePath;
+        const absolutePath = path.join(process.cwd(), cleanPath);
+        
+        if (!fs.existsSync(absolutePath)) {
+          this.logger.warn(`Görsel bulunamadı: ${absolutePath}`);
+          return null;
+        }
+        
+        imageBuffer = fs.readFileSync(absolutePath);
+        const ext = path.extname(absolutePath) || '.png';
+        const base = path.basename(absolutePath, ext);
+        outputFilename = `${base}-story${ext}`;
+        const outputDir = path.dirname(absolutePath);
+        outputAbsolutePath = path.join(outputDir, outputFilename);
+        relativeOutputDir = path.dirname(cleanPath);
       }
       
       // Target resolution for Instagram Stories: 1080x1920 (9:16 aspect ratio)
@@ -455,7 +484,7 @@ Video promptu (videoPrompt) için kurallar:
       const targetHeight = 1920;
       
       // 1. Resize original image to width 1080 (height scales proportionally)
-      const resizedBuffer = await sharp(absolutePath)
+      const resizedBuffer = await sharp(imageBuffer)
         .resize({ width: targetWidth })
         .toBuffer();
 
@@ -471,20 +500,24 @@ Video promptu (videoPrompt) için kurallar:
       .composite([{ input: resizedBuffer, top: 0, left: 0 }])
       .toBuffer();
       
-      // Split text into lines (max 28 characters per line)
-      const words = text.split(/\s+/);
+      // Split text into lines (max 28 characters per line, preserving explicit newlines)
+      const rawLines = text.split(/\r?\n/);
       const lines: string[] = [];
-      let currentLine = '';
-      for (const word of words) {
-        if ((currentLine + ' ' + word).length > 28) {
-          lines.push(currentLine.trim());
-          currentLine = word;
-        } else {
-          currentLine = currentLine ? currentLine + ' ' + word : word;
+      for (const rawLine of rawLines) {
+        const words = rawLine.trim().split(/\s+/);
+        let currentLine = '';
+        for (const word of words) {
+          if (!word) continue;
+          if ((currentLine + ' ' + word).length > 28) {
+            if (currentLine) lines.push(currentLine.trim());
+            currentLine = word;
+          } else {
+            currentLine = currentLine ? currentLine + ' ' + word : word;
+          }
         }
-      }
-      if (currentLine) {
-        lines.push(currentLine.trim());
+        if (currentLine) {
+          lines.push(currentLine.trim());
+        }
       }
       
       const fontSize = 42;
@@ -514,17 +547,10 @@ Video promptu (videoPrompt) için kurallar:
         </svg>
       `;
       
-      const ext = path.extname(absolutePath);
-      const base = path.basename(absolutePath, ext);
-      const outputFilename = `${base}-story${ext}`;
-      const outputDir = path.dirname(absolutePath);
-      const outputAbsolutePath = path.join(outputDir, outputFilename);
-      
       await sharp(processedBuffer)
         .composite([{ input: Buffer.from(svgOverlay), blend: 'over' }])
         .toFile(outputAbsolutePath);
         
-      const relativeOutputDir = path.dirname(cleanPath);
       return `/${relativeOutputDir}/${outputFilename}`.replace(/\\/g, '/');
     } catch (error) {
       this.logger.error('Story görseline metin ekleme hatası:', error);
