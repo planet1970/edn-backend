@@ -116,4 +116,54 @@ export class SocialMediaController {
   async publishPost(@Param('id', ParseIntPipe) id: number) {
     return this.socialMediaService.publishPost(id);
   }
+
+  // --- Campaigns ---
+  @Get('campaigns')
+  @ApiOperation({ summary: 'Get all configured social media campaigns' })
+  async getCampaigns() {
+    return this.socialMediaService.getCampaigns();
+  }
+
+  @Post('campaigns')
+  @ApiOperation({ summary: 'Create a new social media campaign' })
+  async createCampaign(@Body() body: any) {
+    return this.socialMediaService.createCampaign(body);
+  }
+
+  @Put('campaigns/:id')
+  @ApiOperation({ summary: 'Update a social media campaign' })
+  async updateCampaign(@Param('id', ParseIntPipe) id: number, @Body() body: any) {
+    return this.socialMediaService.updateCampaign(id, body);
+  }
+
+  @Delete('campaigns/:id')
+  @ApiOperation({ summary: 'Delete a social media campaign' })
+  async deleteCampaign(@Param('id', ParseIntPipe) id: number) {
+    return this.socialMediaService.deleteCampaign(id);
+  }
+
+  @Post('campaigns/:id/toggle')
+  @ApiOperation({ summary: 'Toggle campaign active status' })
+  async toggleCampaign(@Param('id', ParseIntPipe) id: number) {
+    return this.socialMediaService.toggleCampaign(id);
+  }
+
+  // --- Telegram Settings ---
+  @Get('telegram')
+  @ApiOperation({ summary: 'Get current Telegram notification settings' })
+  async getTelegramSetting() {
+    return this.socialMediaService.getTelegramSetting();
+  }
+
+  @Post('telegram')
+  @ApiOperation({ summary: 'Save or update Telegram notification settings' })
+  async saveTelegramSetting(@Body() body: { botToken: string; chatId: string; isActive: boolean }) {
+    return this.socialMediaService.saveTelegramSetting(body);
+  }
+
+  @Post('telegram/test')
+  @ApiOperation({ summary: 'Send a test notification to Telegram' })
+  async testTelegram() {
+    return this.socialMediaService.sendTelegramTestMessage();
+  }
 }

@@ -646,3 +646,26 @@ model SocialMediaPost {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 }
+
+model SocialMediaCampaign {
+  id           Int       @id @default(autoincrement())
+  title        String
+  prompt       String
+  platform     String    // "INSTAGRAM", "FACEBOOK", "TIKTOK"
+  postType     String    @default("POST") // "POST", "STORY", "BOTH"
+  frequency    String    @default("DAILY") // "DAILY", "WEEKLY"
+  timeOfDay    String    @default("09:00") // Format "HH:MM"
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  lastRunAt    DateTime?
+}
+
+model TelegramSetting {
+  id        Int      @id @default(autoincrement())
+  botToken  String
+  chatId    String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

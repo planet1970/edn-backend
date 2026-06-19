@@ -108,6 +108,7 @@ Video promptu (videoPrompt) için kurallar:
             logs.push('Metin OpenAI GPT ile başarıyla üretildi.');
           }
         } catch (error) {
+          this.checkAiTokenError(error, 'OpenAI (Metin)');
           logs.push(`OpenAI metin üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
           textProviderUsed = 'simulation';
         }
@@ -151,6 +152,7 @@ Video promptu (videoPrompt) için kurallar:
             logs.push('Metin Anthropic Claude ile başarıyla üretildi.');
           }
         } catch (error) {
+          this.checkAiTokenError(error, 'Anthropic Claude (Metin)');
           logs.push(`Claude metin üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
           textProviderUsed = 'simulation';
         }
@@ -192,6 +194,7 @@ Video promptu (videoPrompt) için kurallar:
             logs.push('Metin Google Gemini ile başarıyla üretildi.');
           }
         } catch (error) {
+          this.checkAiTokenError(error, 'Google Gemini (Metin)');
           logs.push(`Gemini metin üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
           textProviderUsed = 'simulation';
         }
@@ -239,6 +242,7 @@ Video promptu (videoPrompt) için kurallar:
             imageUrl = data.data?.[0]?.url || '';
             logs.push('Görsel OpenAI DALL-E 3 ile başarıyla üretildi.');
           } catch (error) {
+            this.checkAiTokenError(error, 'OpenAI DALL-E 3 (Görsel)');
             logs.push(`DALL-E görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
             imageProviderUsed = 'simulation';
           }
@@ -282,6 +286,7 @@ Video promptu (videoPrompt) için kurallar:
               logs.push('Görsel Stability AI ile başarıyla üretildi.');
             }
           } catch (error) {
+            this.checkAiTokenError(error, 'Stability AI (Görsel)');
             logs.push(`Stability AI görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
             imageProviderUsed = 'simulation';
           }
@@ -315,6 +320,7 @@ Video promptu (videoPrompt) için kurallar:
             imageUrl = `data:image/jpeg;base64,${base64}`;
             logs.push('Görsel Hugging Face (Stable Diffusion XL) ile başarıyla üretildi.');
           } catch (error) {
+            this.checkAiTokenError(error, 'Hugging Face FLUX (Görsel)');
             logs.push(`Hugging Face görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
             imageProviderUsed = 'simulation';
           }
@@ -602,6 +608,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
             throw new Error(`DALL-E hatası: ${response.statusText} - ${errText}`);
           }
         } catch (error) {
+          this.checkAiTokenError(error, 'OpenAI DALL-E 3 (Yeniden Görsel)');
           logs.push(`DALL-E görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
           imageProviderUsed = 'simulation';
         }
@@ -645,6 +652,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
             throw new Error(`Stability AI hatası: ${response.statusText} - ${errText}`);
           }
         } catch (error) {
+          this.checkAiTokenError(error, 'Stability AI (Yeniden Görsel)');
           logs.push(`Stability AI görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
           imageProviderUsed = 'simulation';
         }
@@ -678,6 +686,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
             throw new Error(`Hugging Face hatası: ${response.statusText} - ${errText}`);
           }
         } catch (error) {
+          this.checkAiTokenError(error, 'Hugging Face FLUX (Yeniden Görsel)');
           logs.push(`Hugging Face görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
           imageProviderUsed = 'simulation';
         }
@@ -755,13 +764,23 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
   }
 
   async createPost(data: any) {
+    let imageUrl = data.imageUrl;
+    let videoUrl = data.videoUrl;
+
+    if (imageUrl && imageUrl.startsWith('data:')) {
+      imageUrl = this.saveBase64Media(imageUrl, 'manual-image');
+    }
+    if (videoUrl && videoUrl.startsWith('data:')) {
+      videoUrl = this.saveBase64Media(videoUrl, 'manual-video');
+    }
+
     return this.prisma.socialMediaPost.create({
       data: {
         platform: data.platform,
         prompt: data.prompt || '',
         caption: data.caption,
-        imageUrl: data.imageUrl,
-        videoUrl: data.videoUrl,
+        imageUrl: imageUrl,
+        videoUrl: videoUrl,
         postType: data.postType || 'POST',
         status: data.status || 'DRAFT',
         scheduledAt: data.scheduledAt ? new Date(data.scheduledAt) : null,
@@ -858,6 +877,15 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         this.logger.log(`[SIMULATED] Posting to ${post.platform} for account ${account.username}`);
         await new Promise((resolve) => setTimeout(resolve, 1500)); // Simulate network latency
         
+        const msg = `✅ [SİMÜLASYON] <b>YENİ GÖNDERİ PAYLAŞILDI</b>\n\n` +
+          `<b>Platform:</b> ${post.platform}\n` +
+          `<b>Hesap:</b> ${account.username}\n` +
+          `<b>Gönderi Türü:</b> ${post.postType}\n` +
+          `<b>Metin:</b>\n<i>${post.caption}</i>\n` +
+          (post.imageUrl ? `\n🖼️ Görsel Ekli` : '') +
+          (post.videoUrl ? `\n🎥 Video Ekli` : '');
+        await this.sendTelegramNotification(msg);
+
         await this.prisma.socialMediaPost.update({
           where: { id },
           data: {
@@ -943,6 +971,14 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
           if (!fbResponse.ok) {
             throw new Error(`Facebook API Hatası: ${fbData?.error?.message || fbResponse.statusText}`);
           }
+
+          const msg = `✅ <b>FACEBOOK GÖNDERİSİ PAYLAŞILDI</b>\n\n` +
+            `<b>Hesap:</b> ${account.username}\n` +
+            `<b>Post ID:</b> #${id}\n` +
+            `<b>Metin:</b>\n<i>${post.caption}</i>\n` +
+            (post.imageUrl ? `\n🖼️ Görsel Ekli` : '') +
+            (post.videoUrl ? `\n🎥 Video Ekli` : '');
+          await this.sendTelegramNotification(msg);
 
           await this.prisma.socialMediaPost.update({
             where: { id },
@@ -1122,6 +1158,14 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
             await publishToInstagram(post.postType as 'POST' | 'STORY');
           }
 
+          const msg = `✅ <b>INSTAGRAM GÖNDERİSİ PAYLAŞILDI</b>\n\n` +
+            `<b>Hesap:</b> ${account.username}\n` +
+            `<b>Post ID:</b> #${id}\n` +
+            `<b>Metin:</b>\n<i>${post.caption}</i>\n` +
+            (post.imageUrl ? `\n🖼️ Görsel Ekli` : '') +
+            (post.videoUrl ? `\n🎥 Video Ekli` : '');
+          await this.sendTelegramNotification(msg);
+
           await this.prisma.socialMediaPost.update({
             where: { id },
             data: {
@@ -1138,6 +1182,25 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
       }
     } catch (error) {
       this.logger.error(`Gönderi paylaşımında hata (${post.platform}):`, error);
+      
+      const isTokenErr = error.message.toLowerCase().includes('token') || 
+                         error.message.toLowerCase().includes('permission') || 
+                         error.message.toLowerCase().includes('session') ||
+                         error.message.toLowerCase().includes('authoriz') ||
+                         error.message.toLowerCase().includes('190');
+      
+      const errMsgHeader = isTokenErr 
+        ? `⚠️ <b>HESAP ACCESS TOKEN SÜRESİ DOLDU VEYA YETKİ HATASI</b>`
+        : `❌ <b>GÖNDERİ PAYLAŞILAMADI (HATA)</b>`;
+
+      const notificationMsg = `${errMsgHeader}\n\n` +
+        `<b>Platform:</b> ${post.platform}\n` +
+        `<b>Post ID:</b> #${id}\n` +
+        `<b>Hata Detayı:</b> <code>${error.message}</code>\n\n` +
+        `💡 Lütfen Hesap Tanımları sekmesinden bağlantıyı doğrulayın veya yenileyin.`;
+      
+      await this.sendTelegramNotification(notificationMsg);
+
       await this.prisma.socialMediaPost.update({
         where: { id },
         data: {
@@ -1259,6 +1322,19 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         if (!response.ok) {
           const errMsg = data?.error?.message || 'Meta API doğrulama hatası.';
           
+          const isTokenErr = errMsg.toLowerCase().includes('token') || 
+                             errMsg.toLowerCase().includes('permission') || 
+                             errMsg.toLowerCase().includes('session') ||
+                             errMsg.toLowerCase().includes('190');
+          if (isTokenErr) {
+            this.sendTelegramNotification(
+              `⚠️ <b>HESAP BAĞLANTI TESTİ BAŞARISIZ (ACCESS TOKEN EXPIRED)</b>\n\n` +
+              `<b>Hesap:</b> ${account.username} (${account.platform})\n` +
+              `<b>Hata:</b> <code>${errMsg}</code>\n\n` +
+              `💡 Lütfen yeni bir sayfa erişim jetonu (Page Access Token) alıp hesabı güncelleyin.`
+            ).catch(err => this.logger.error('Failed to send Telegram alert for connection failure:', err));
+          }
+
           let helpfulTips = '';
           if (errMsg.includes('Unsupported get request') || errMsg.includes('permissions') || errMsg.includes('does not exist')) {
             helpfulTips = '\n\n💡 ÇÖZÜM REHBERİ: Bu hata genellikle şu nedenlerden kaynaklanır:\n' +
@@ -1344,6 +1420,288 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
       } catch (error) {
         this.logger.error(`Zamanlanmış gönderi (#${post.id}) paylaşılamadı:`, error);
       }
+    }
+  }
+
+  // --- Campaigns CRUD ---
+  async getCampaigns() {
+    return this.prisma.socialMediaCampaign.findMany({
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async createCampaign(data: any) {
+    return this.prisma.socialMediaCampaign.create({
+      data: {
+        title: data.title,
+        prompt: data.prompt,
+        platform: data.platform,
+        postType: data.postType || 'POST',
+        frequency: data.frequency || 'DAILY',
+        timeOfDay: data.timeOfDay || '09:00',
+        isActive: data.isActive !== undefined ? data.isActive : true,
+      },
+    });
+  }
+
+  async updateCampaign(id: number, data: any) {
+    return this.prisma.socialMediaCampaign.update({
+      where: { id },
+      data: {
+        title: data.title,
+        prompt: data.prompt,
+        platform: data.platform,
+        postType: data.postType,
+        frequency: data.frequency,
+        timeOfDay: data.timeOfDay,
+        isActive: data.isActive,
+      },
+    });
+  }
+
+  async deleteCampaign(id: number) {
+    return this.prisma.socialMediaCampaign.delete({
+      where: { id },
+    });
+  }
+
+  async toggleCampaign(id: number) {
+    const campaign = await this.prisma.socialMediaCampaign.findUnique({
+      where: { id },
+    });
+    if (!campaign) {
+      throw new Error('Kampanya bulunamadı.');
+    }
+    return this.prisma.socialMediaCampaign.update({
+      where: { id },
+      data: {
+        isActive: !campaign.isActive,
+      },
+    });
+  }
+
+  // Cron job for campaigns (runs every minute)
+  @Cron(CronExpression.EVERY_MINUTE)
+  async handleCampaigns() {
+    const now = new Date();
+    // Turkey/Local time HH:MM format
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const timeStr = `${hours}:${minutes}`;
+
+    const activeCampaigns = await this.prisma.socialMediaCampaign.findMany({
+      where: {
+        isActive: true,
+        timeOfDay: timeStr,
+      },
+    });
+
+    if (activeCampaigns.length === 0) {
+      return;
+    }
+
+    this.logger.log(`${activeCampaigns.length} adet aktif kampanya kontrol ediliyor. Saat: ${timeStr}`);
+
+    for (const campaign of activeCampaigns) {
+      try {
+        let shouldRun = false;
+        if (!campaign.lastRunAt) {
+          shouldRun = true;
+        } else {
+          const lastRun = new Date(campaign.lastRunAt);
+          const diffMs = now.getTime() - lastRun.getTime();
+          const diffDays = diffMs / (1000 * 60 * 60 * 24);
+
+          if (campaign.frequency === 'DAILY') {
+            const isSameDay = lastRun.getDate() === now.getDate() &&
+                              lastRun.getMonth() === now.getMonth() &&
+                              lastRun.getFullYear() === now.getFullYear();
+            if (!isSameDay) {
+              shouldRun = true;
+            }
+          } else if (campaign.frequency === 'WEEKLY') {
+            if (diffDays >= 6) {
+              shouldRun = true;
+            }
+          }
+        }
+
+        if (!shouldRun) {
+          continue;
+        }
+
+        this.logger.log(`Kampanya tetiklendi: "${campaign.title}" (#${campaign.id})`);
+
+        // Mark run immediately to prevent concurrency double runs
+        await this.prisma.socialMediaCampaign.update({
+          where: { id: campaign.id },
+          data: { lastRunAt: now },
+        });
+
+        // Set up providers
+        const textProvider = process.env.GEMINI_API_KEY ? 'gemini' : 'simulation';
+        const imageProvider = process.env.HUGGINGFACE_API_KEY ? 'huggingface' : 'simulation';
+
+        // Generate content
+        this.logger.log(`Kampanya postu üretiliyor... Prompt: "${campaign.prompt}"`);
+        const genResult = await this.generatePost(
+          campaign.prompt,
+          campaign.platform,
+          'Samimi',
+          textProvider,
+          imageProvider,
+          'simulation',
+          true, // Include image
+          false, // Include video
+          campaign.postType
+        );
+
+        // Create the post database record
+        const newPost = await this.prisma.socialMediaPost.create({
+          data: {
+            platform: campaign.platform,
+            prompt: campaign.prompt,
+            caption: genResult.caption,
+            imageUrl: genResult.imageUrl || null,
+            videoUrl: null,
+            postType: campaign.postType,
+            status: 'DRAFT',
+          },
+        });
+
+        this.logger.log(`Kampanya postu yayınlanıyor... Post ID: ${newPost.id}`);
+        // Publish it immediately
+        await this.publishPost(newPost.id);
+
+        const campaignMsg = `🤖 <b>ZAMANLANMIŞ GÖREV TETİKLENDİ</b>\n\n` +
+          `<b>Kampanya:</b> ${campaign.title}\n` +
+          `<b>Platform:</b> ${campaign.platform}\n` +
+          `<b>Tür:</b> ${campaign.postType}\n` +
+          `<b>Konu/Talimat:</b> <i>"${campaign.prompt}"</i>\n\n` +
+          `🚀 Kampanya gönderisi otomatik olarak hazırlandı ve paylaşıldı.`;
+        await this.sendTelegramNotification(campaignMsg);
+
+      } catch (error) {
+        this.logger.error(`Kampanya (#${campaign.id}) yürütülürken hata:`, error);
+      }
+    }
+  }
+
+  // --- Telegram Settings CRUD & Notifications ---
+  async getTelegramSetting() {
+    let setting = await this.prisma.telegramSetting.findFirst();
+    if (!setting) {
+      // Return a blank template
+      setting = {
+        id: 0,
+        botToken: '',
+        chatId: '',
+        isActive: false,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+    }
+    return setting;
+  }
+
+  async saveTelegramSetting(data: { botToken: string; chatId: string; isActive: boolean }) {
+    const existing = await this.prisma.telegramSetting.findFirst();
+    if (existing) {
+      return this.prisma.telegramSetting.update({
+        where: { id: existing.id },
+        data: {
+          botToken: data.botToken.trim(),
+          chatId: data.chatId.trim(),
+          isActive: data.isActive,
+        },
+      });
+    } else {
+      return this.prisma.telegramSetting.create({
+        data: {
+          botToken: data.botToken.trim(),
+          chatId: data.chatId.trim(),
+          isActive: data.isActive,
+        },
+      });
+    }
+  }
+
+  async sendTelegramNotification(message: string) {
+    try {
+      const setting = await this.prisma.telegramSetting.findFirst();
+      if (!setting || !setting.isActive || !setting.botToken || !setting.chatId) {
+        return;
+      }
+
+      const url = `https://api.telegram.org/bot${setting.botToken}/sendMessage`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: setting.chatId,
+          text: message,
+          parse_mode: 'HTML',
+        }),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        this.logger.error(`Telegram bildirim gönderme hatası: ${errText}`);
+      }
+    } catch (err) {
+      this.logger.error('Telegram bildirim fonksiyonunda beklenmeyen hata:', err);
+    }
+  }
+
+  async sendTelegramTestMessage() {
+    const setting = await this.prisma.telegramSetting.findFirst();
+    if (!setting || !setting.botToken || !setting.chatId) {
+      throw new Error('Telegram ayarları henüz yapılandırılmamış veya eksik.');
+    }
+
+    const testMsg = `🔔 <b>SMYP Telegram Bildirim Testi</b>\n\nBu mesaj Telegram entegrasyonunuzun başarıyla çalıştığını göstermektedir.\n\n📅 Tarih: ${new Date().toLocaleString('tr-TR')}`;
+    
+    const url = `https://api.telegram.org/bot${setting.botToken}/sendMessage`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: setting.chatId,
+        text: testMsg,
+        parse_mode: 'HTML',
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Telegram API Hatası: ${errText}`);
+    }
+
+    return { success: true, message: 'Test mesajı Telegram hesabınıza başarıyla gönderildi.' };
+  }
+
+  private checkAiTokenError(error: Error, provider: string) {
+    const msg = error.message.toLowerCase();
+    const isTokenQuotaError = msg.includes('quota') || 
+                              msg.includes('limit') || 
+                              msg.includes('key') || 
+                              msg.includes('token') || 
+                              msg.includes('429') || 
+                              msg.includes('401') || 
+                              msg.includes('exhausted') || 
+                              msg.includes('billing') ||
+                              msg.includes('unauthorized') ||
+                              msg.includes('forbidden');
+    
+    if (isTokenQuotaError) {
+      const alertMsg = `⚠️ <b>YAPAY ZEKA LİMİT/TOKEN HATASI</b>\n\n` +
+        `<b>Servis Sağlayıcı:</b> ${provider}\n` +
+        `<b>Detay:</b> <code>${error.message}</code>\n\n` +
+        `⚙️ Sistem geçici olarak simülasyon moduna dönmüştür. Lütfen API anahtarlarınızı veya kotalarınızı kontrol edin.`;
+      
+      this.sendTelegramNotification(alertMsg).catch(err => {
+        this.logger.error('Failed to send Telegram alert for AI error:', err);
+      });
     }
   }
 }
