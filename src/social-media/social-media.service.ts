@@ -3,6 +3,7 @@ import { PrismaService } from 'src/prisma/prisma.service';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as sharp from 'sharp';
 
 @Injectable()
 export class SocialMediaService {
@@ -423,6 +424,83 @@ Video promptu (videoPrompt) için kurallar:
     } catch (error) {
       this.logger.error('Base64 medya kaydedilirken hata:', error);
       return dataUrl;
+    }
+  }
+
+  private async overlayTextOnImage(relativeImagePath: string, text: string): Promise<string | null> {
+    if (!relativeImagePath) return null;
+    
+    try {
+      const cleanPath = relativeImagePath.startsWith('/') ? relativeImagePath.substring(1) : relativeImagePath;
+      const absolutePath = path.join(process.cwd(), cleanPath);
+      
+      if (!fs.existsSync(absolutePath)) {
+        this.logger.warn(`Görsel bulunamadı: ${absolutePath}`);
+        return null;
+      }
+      
+      const metadata = await sharp(absolutePath).metadata();
+      const width = metadata.width || 1080;
+      const height = metadata.height || 1920;
+      
+      // Split text into lines
+      const words = text.split(/\s+/);
+      const lines: string[] = [];
+      let currentLine = '';
+      for (const word of words) {
+        if ((currentLine + ' ' + word).length > 35) {
+          lines.push(currentLine.trim());
+          currentLine = word;
+        } else {
+          currentLine = currentLine ? currentLine + ' ' + word : word;
+        }
+      }
+      if (currentLine) {
+        lines.push(currentLine.trim());
+      }
+      
+      const fontSize = Math.round(width * 0.035);
+      const lineHeight = fontSize * 1.4;
+      const padding = fontSize * 1.5;
+      const boxHeight = lines.length * lineHeight + padding * 2;
+      const boxWidth = width * 0.85;
+      const boxX = (width - boxWidth) / 2;
+      const boxY = height - boxHeight - (height * 0.08); // 8% margin from bottom
+      
+      let textElements = '';
+      lines.forEach((line, index) => {
+        const yPos = boxY + padding + (index * lineHeight) + fontSize;
+        const escapedLine = line
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&apos;');
+        textElements += `<text x="${width / 2}" y="${yPos}" fill="white" font-family="sans-serif" font-size="${fontSize}px" font-weight="bold" text-anchor="middle">${escapedLine}</text>`;
+      });
+      
+      const svgOverlay = `
+        <svg width="${width}" height="${height}">
+          <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="${fontSize * 0.5}" ry="${fontSize * 0.5}" fill="black" fill-opacity="0.6" />
+          ${textElements}
+        </svg>
+      `;
+      
+      const ext = path.extname(absolutePath);
+      const base = path.basename(absolutePath, ext);
+      const outputFilename = `${base}-story${ext}`;
+      const outputDir = path.dirname(absolutePath);
+      const outputAbsolutePath = path.join(outputDir, outputFilename);
+      
+      await sharp(absolutePath)
+        .composite([{ input: Buffer.from(svgOverlay), blend: 'over' }])
+        .toFile(outputAbsolutePath);
+        
+      const relativeOutputDir = path.dirname(cleanPath);
+      return `/${relativeOutputDir}/${outputFilename}`.replace(/\\/g, '/');
+    } catch (error) {
+      this.logger.error('Story görseline metin ekleme hatası:', error);
+      return null;
     }
   }
 
@@ -932,7 +1010,19 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
               if (videoUrl) {
                 containerBody.video_url = videoUrl;
               } else if (imageUrl) {
-                containerBody.image_url = imageUrl;
+                let storyImageUrl = imageUrl;
+                if (post.caption && post.caption.trim()) {
+                  try {
+                    await this.updatePostProgress(id, 'Instagram: Hikaye görseli üzerine metin yazılıyor...');
+                    const relativeProcessedPath = await this.overlayTextOnImage(post.imageUrl, post.caption);
+                    if (relativeProcessedPath) {
+                      storyImageUrl = this.getAbsoluteUrl(relativeProcessedPath);
+                    }
+                  } catch (err) {
+                    this.logger.error(`Hikaye görseline metin ekleme başarısız (orijinal kullanılacak): ${err.message}`);
+                  }
+                }
+                containerBody.image_url = storyImageUrl;
               } else {
                 throw new Error('Hikaye paylaşımı için bir görsel veya video gereklidir.');
               }
