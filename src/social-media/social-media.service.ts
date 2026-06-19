@@ -42,8 +42,19 @@ export class SocialMediaService {
     // System instruction for Text AIs
     const systemInstruction = `Sen profesyonel bir sosyal medya içerik üreticisisin. 
 Kullanıcının belirteceği konu veya prompt doğrultusunda, belirtilen platform ve ses tonuna uygun, dikkat çekici, emojilerle zenginleştirilmiş ve popüler hashtag'leri içeren bir paylaşım yazısı hazırla.
-Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka görsel üreticisine (örn: Midjourney, DALL-E) verilebilecek detaylı İngilizce görsel üretim promptu (imagePrompt) hazırla.
-Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreticisine (örn: Sora, Runway) verilebilecek detaylı İngilizce video üretim promptu (videoPrompt) hazırla.
+
+Paylaşım yazısı için kurallar:
+1. Konu hakkında mümkün olduğunca az bilinen, şaşırtıcı ve ilgi çekici tarihi/kültürel detaylara yer ver. Eğer spesifik bir konu isteniyorsa, o konuyla ilgili derinlemesine ilginç ve detaylı bilgiler sun.
+2. Paylaşımın sonuna kesinlikle "yorumlar kısmında buluşalım", "yorumlar da buluşalım", "yorumlarınızı bekliyorum" veya benzeri yorum yapma çağrıları (call-to-action) ekleme.
+
+Görsel promptu (imagePrompt) için kurallar:
+1. Görsel üretim promptunu detaylı ve İngilizce olarak yaz.
+2. Görselde insan figürü/kullanımı olmamasına (insan figürlerinden kaçınmaya) özen göster.
+3. Görsel tarzında sert/net çizgiler ve yapay parlaklıklar yerine; daha yumuşak, soft, atmosferik, sanatsal, rüya gibi ve estetik (soft focus, atmospheric, artistic style, gentle lighting, painterly details, avoid harsh outlines, no human figures) bir hava tarif et.
+
+Video promptu (videoPrompt) için kurallar:
+1. Video üretim promptunu detaylı ve İngilizce olarak yaz.
+
 Çıktıyı kesinlikle geçerli bir JSON formatında ver. JSON formatı şu şekilde olmalıdır:
 {
   "caption": "Sosyal medya gönderi metni...",
@@ -415,11 +426,194 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
     }
   }
 
+  async regenerateImage(
+    imagePrompt: string,
+    feedback?: string,
+    imageProvider: string = 'huggingface',
+  ) {
+    const logs: string[] = [];
+    let finalPrompt = imagePrompt;
+    let imageProviderUsed = imageProvider;
+    let imageUrl = '';
+
+    if (feedback && feedback.trim()) {
+      const geminiKey = process.env.GEMINI_API_KEY;
+      if (geminiKey) {
+        try {
+          logs.push(`Görsel promptu kullanıcının geribildirimiyle ("${feedback}") güncelleniyor...`);
+          const systemInstruction = `You are an expert AI prompt engineer. Refine the given English image generation prompt incorporating the user's Turkish feedback/correction. 
+The updated prompt must follow these strict rules:
+1. Avoid human figures/presence.
+2. Use a soft, atmospheric, artistic, or painterly style. Avoid harsh/sharp outlines.
+3. Keep the prompt in English.
+Output ONLY the final updated English prompt. Do not write any introduction, code blocks, or explanation.`;
+
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [
+                  { role: 'user', parts: [{ text: `Original Prompt: "${imagePrompt}"\nUser Feedback: "${feedback}"\n\nGenerate the refined English prompt:` }] }
+                ],
+                systemInstruction: { parts: [{ text: systemInstruction }] },
+                generationConfig: { temperature: 0.7 }
+              })
+            }
+          );
+
+          if (response.ok) {
+            const resData = await response.json();
+            const textResponse = resData.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (textResponse && textResponse.trim()) {
+              finalPrompt = textResponse.trim().replace(/^["']|["']$/g, '');
+              logs.push(`Yeni görsel promptu: "${finalPrompt}"`);
+            }
+          } else {
+            logs.push('Gemini ile prompt güncelleme başarısız oldu, orijinal prompt kullanılacak.');
+          }
+        } catch (error) {
+          logs.push(`Prompt güncelleme sırasında hata: ${error.message}`);
+        }
+      } else {
+        logs.push('GEMINI_API_KEY bulunamadı, feedback uygulanamadı.');
+      }
+    }
+
+    if (imageProvider === 'dalle') {
+      const openAiKey = process.env.OPENAI_API_KEY;
+      if (!openAiKey) {
+        logs.push('OPENAI_API_KEY bulunamadı. DALL-E görsel üretimi için simülasyon moduna geçiliyor.');
+        imageProviderUsed = 'simulation';
+      } else {
+        try {
+          const response = await fetch('https://api.openai.com/v1/images/generations', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${openAiKey}`
+            },
+            body: JSON.stringify({
+              model: 'dall-e-3',
+              prompt: finalPrompt,
+              n: 1,
+              size: '1024x1024'
+            })
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            imageUrl = data.data?.[0]?.url || '';
+            logs.push('Görsel OpenAI DALL-E 3 ile başarıyla yeniden üretildi.');
+          } else {
+            const errText = await response.text();
+            throw new Error(`DALL-E hatası: ${response.statusText} - ${errText}`);
+          }
+        } catch (error) {
+          logs.push(`DALL-E görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
+          imageProviderUsed = 'simulation';
+        }
+      }
+    } else if (imageProvider === 'stability') {
+      const stabilityKey = process.env.STABILITY_API_KEY;
+      if (!stabilityKey) {
+        logs.push('STABILITY_API_KEY bulunamadı. Stability AI görsel üretimi için simülasyon moduna geçiliyor.');
+        imageProviderUsed = 'simulation';
+      } else {
+        try {
+          const response = await fetch(
+            'https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+                Authorization: `Bearer ${stabilityKey}`
+              },
+              body: JSON.stringify({
+                text_prompts: [{ text: finalPrompt }],
+                cfg_scale: 7,
+                height: 1024,
+                width: 1024,
+                samples: 1,
+                steps: 30
+              })
+            }
+          );
+
+          if (response.ok) {
+            const data = await response.json();
+            const base64 = data.artifacts?.[0]?.base64;
+            if (base64) {
+              imageUrl = `data:image/png;base64,${base64}`;
+              logs.push('Görsel Stability AI ile başarıyla yeniden üretildi.');
+            }
+          } else {
+            const errText = await response.text();
+            throw new Error(`Stability AI hatası: ${response.statusText} - ${errText}`);
+          }
+        } catch (error) {
+          logs.push(`Stability AI görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
+          imageProviderUsed = 'simulation';
+        }
+      }
+    } else if (imageProvider === 'huggingface') {
+      const hfKey = process.env.HUGGINGFACE_API_KEY;
+      if (!hfKey) {
+        logs.push('HUGGINGFACE_API_KEY bulunamadı. Hugging Face görsel üretimi için simülasyon moduna geçiliyor.');
+        imageProviderUsed = 'simulation';
+      } else {
+        try {
+          const response = await fetch(
+            'https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${hfKey}`,
+              },
+              body: JSON.stringify({ inputs: finalPrompt }),
+            },
+          );
+
+          if (response.ok) {
+            const buffer = await response.arrayBuffer();
+            const base64 = Buffer.from(buffer).toString('base64');
+            imageUrl = `data:image/jpeg;base64,${base64}`;
+            logs.push('Görsel Hugging Face (FLUX.1-schnell) ile başarıyla yeniden üretildi.');
+          } else {
+            const errText = await response.text();
+            throw new Error(`Hugging Face hatası: ${response.statusText} - ${errText}`);
+          }
+        } catch (error) {
+          logs.push(`Hugging Face görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
+          imageProviderUsed = 'simulation';
+        }
+      }
+    }
+
+    if (imageProviderUsed === 'simulation' || !imageUrl) {
+      const ts = Date.now();
+      imageUrl = `https://images.unsplash.com/photo-1564507592333-c60657eea523?auto=format&fit=crop&w=800&q=80&sig=${ts}`;
+      logs.push('Simüle edilmiş Unsplash görseli atandı.');
+    }
+
+    const savedImageUrl = imageUrl ? this.saveBase64Media(imageUrl, 'social-image') : imageUrl;
+
+    return {
+      imageUrl: savedImageUrl,
+      imagePrompt: finalPrompt,
+      imageProviderUsed,
+      logs,
+    };
+  }
+
   private getSimulatedResponse(prompt: string, platform: string, tone: string) {
     const formattedPrompt = prompt ? `"${prompt}"` : 'Edirne turizmi';
     return {
-      caption: `🌟 [Simülasyon Modu] ${formattedPrompt} hakkında harika bir ${platform} paylaşımı! (${tone} tonunda)\n\nEdirne'nin zengin tarihi ve eşsiz kültürel mirasları her köşede sizi bekliyor. Selimiye Camii'nden Meriç Köprüsü'ne kadar uzanan bu eşsiz serüveni keşfetmeye hazır mısınız? 🕌🌉✨\n\nSiz en çok hangi tarihi noktayı merak ediyorsunuz? Yorumlarda buluşalım! 👇\n\n#EdirneGezisi #TarihiŞehirEdirne #EdirneKültürü #Gezginler #SeyahatNotları #Simülasyon`,
-      imagePrompt: `A beautiful cinematic shot of historical ${prompt} in Edirne, Turkey, golden hour lighting, hyper-detailed, 8k resolution, professional travel photography style.`,
+      caption: `🌟 [Simülasyon Modu] ${formattedPrompt} hakkında harika bir ${platform} paylaşımı! (${tone} tonunda)\n\nEdirne'nin zengin tarihi ve eşsiz kültürel mirasları her köşede sizi bekliyor. Selimiye Camii'nden Meriç Köprüsü'ne kadar uzanan bu eşsiz serüveni keşfetmeye hazır mısınız? 🕌🌉✨\n\n#EdirneGezisi #TarihiŞehirEdirne #EdirneKültürü #Gezginler #SeyahatNotları #Simülasyon`,
+      imagePrompt: `A beautiful soft-focus, atmospheric, artistic shot of historical ${prompt} in Edirne, Turkey, warm lighting, dreamlike quality, no people, painterly details.`,
       isSimulated: true,
     };
   }

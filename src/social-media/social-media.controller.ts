@@ -36,6 +36,22 @@ export class SocialMediaController {
     );
   }
 
+  @Post('regenerate-image')
+  @ApiOperation({ summary: 'Regenerate image from prompt and optional feedback/correction' })
+  async regenerateImage(
+    @Body() body: {
+      imagePrompt: string;
+      feedback?: string;
+      imageProvider?: string;
+    },
+  ) {
+    return this.socialMediaService.regenerateImage(
+      body.imagePrompt,
+      body.feedback,
+      body.imageProvider,
+    );
+  }
+
   // --- Accounts ---
   @Get('accounts')
   @ApiOperation({ summary: 'Get all configured social media accounts' })
