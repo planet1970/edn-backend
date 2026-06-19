@@ -611,6 +611,14 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
             );
           }
 
+          if (process.env.NODE_ENV === 'development' && !process.env.BACKEND_URL && (post.imageUrl || post.videoUrl)) {
+             throw new Error(
+               'Geliştirme (development) modundasınız ancak .env dosyasında BACKEND_URL tanımlanmamış. ' +
+               'Yapay zeka ile yerel olarak üretilen görseller canlı sunucuda (api.edirnego.com) bulunmadığı için Meta tarafından indirilemez ve medya işleme zaman aşımına uğrar. ' +
+               'Lütfen ngrok kullanıp .env dosyanıza BACKEND_URL=https://<ngrok-url>.ngrok-free.app ekleyin.'
+             );
+          }
+
           let fbUrl = `https://graph.facebook.com/v18.0/${pageId}/feed`;
           let body: any = {
             message: post.caption,
@@ -707,6 +715,14 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
               'Görsel veya video yerel sunucuda (localhost) veya veri formatında barındırılıyor. ' +
               'Instagram API\'sinin medyayı indirebilmesi için genel, internete açık bir URL gereklidir.'
             );
+          }
+
+          if (process.env.NODE_ENV === 'development' && !process.env.BACKEND_URL && (post.imageUrl || post.videoUrl)) {
+             throw new Error(
+               'Geliştirme (development) modundasınız ancak .env dosyasında BACKEND_URL tanımlanmamış. ' +
+               'Yapay zeka ile yerel olarak üretilen görseller canlı sunucuda (api.edirnego.com) bulunmadığı için Meta tarafından indirilemez ve medya işleme zaman aşımına uğrar. ' +
+               'Lütfen ngrok kullanıp .env dosyanıza BACKEND_URL=https://<ngrok-url>.ngrok-free.app ekleyin.'
+             );
           }
 
           // Helper to publish to Instagram
