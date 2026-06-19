@@ -483,10 +483,27 @@ Video promptu (videoPrompt) için kurallar:
       const targetWidth = 1080;
       const targetHeight = 1920;
       
-      // 1. Resize original image to width 1080 (height scales proportionally)
-      const resizedBuffer = await sharp(imageBuffer)
-        .resize({ width: targetWidth })
-        .toBuffer();
+      // 1. Resize original image with smart aspect-ratio check
+      const metadata = await sharp(imageBuffer).metadata();
+      const originalWidth = metadata.width || 1080;
+      const originalHeight = metadata.height || 1920;
+      const resizedHeight = Math.round(originalHeight * (targetWidth / originalWidth));
+
+      let resizedBuffer: Buffer;
+      if (resizedHeight > targetHeight) {
+        resizedBuffer = await sharp(imageBuffer)
+          .resize({
+            width: targetWidth,
+            height: targetHeight,
+            fit: 'cover',
+            position: 'top'
+          })
+          .toBuffer();
+      } else {
+        resizedBuffer = await sharp(imageBuffer)
+          .resize({ width: targetWidth })
+          .toBuffer();
+      }
 
       // 2. Create a white 1080x1920 canvas and overlay the resized image at the top (overflow gets cropped at 1920)
       const processedBuffer = await sharp({
@@ -498,6 +515,7 @@ Video promptu (videoPrompt) için kurallar:
         }
       })
       .composite([{ input: resizedBuffer, top: 0, left: 0 }])
+      .png()
       .toBuffer();
       
       // Split text into lines (max 28 characters per line, preserving explicit newlines)
