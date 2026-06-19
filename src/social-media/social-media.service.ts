@@ -1654,30 +1654,48 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
   }
 
   async sendTelegramTestMessage() {
-    const setting = await this.prisma.telegramSetting.findFirst();
-    if (!setting || !setting.botToken || !setting.chatId) {
-      throw new Error('Telegram ayarları henüz yapılandırılmamış veya eksik.');
+    try {
+      const setting = await this.prisma.telegramSetting.findFirst();
+      if (!setting || !setting.botToken || !setting.chatId) {
+        return {
+          success: false,
+          message: 'Telegram ayarları henüz yapılandırılmamış veya eksik. Lütfen önce bilgileri kaydedin.',
+        };
+      }
+
+      const testMsg = `🔔 <b>SMYP Telegram Bildirim Testi</b>\n\nBu mesaj Telegram entegrasyonunuzun başarıyla çalıştığını göstermektedir.\n\n📅 Tarih: ${new Date().toLocaleString('tr-TR')}`;
+      
+      const url = `https://api.telegram.org/bot${setting.botToken}/sendMessage`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: setting.chatId,
+          text: testMsg,
+          parse_mode: 'HTML',
+        }),
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        let detail = errText;
+        try {
+          const parsed = JSON.parse(errText);
+          detail = parsed.description || errText;
+        } catch {}
+        return {
+          success: false,
+          message: `Telegram Bildirim Gönderimi Başarısız: ${detail}`,
+        };
+      }
+
+      return { success: true, message: 'Test mesajı Telegram hesabınıza başarıyla gönderildi.' };
+    } catch (error) {
+      return {
+        success: false,
+        message: `Sunucu Hatası: ${error.message}`,
+      };
     }
-
-    const testMsg = `🔔 <b>SMYP Telegram Bildirim Testi</b>\n\nBu mesaj Telegram entegrasyonunuzun başarıyla çalıştığını göstermektedir.\n\n📅 Tarih: ${new Date().toLocaleString('tr-TR')}`;
-    
-    const url = `https://api.telegram.org/bot${setting.botToken}/sendMessage`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: setting.chatId,
-        text: testMsg,
-        parse_mode: 'HTML',
-      }),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Telegram API Hatası: ${errText}`);
-    }
-
-    return { success: true, message: 'Test mesajı Telegram hesabınıza başarıyla gönderildi.' };
   }
 
   private checkAiTokenError(error: Error, provider: string) {
