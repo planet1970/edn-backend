@@ -444,16 +444,24 @@ Video promptu (videoPrompt) için kurallar:
         return null;
       }
       
-      const metadata = await sharp(absolutePath).metadata();
-      const width = metadata.width || 1080;
-      const height = metadata.height || 1920;
+      // Target resolution for Instagram Stories: 1080x1920 (9:16 aspect ratio)
+      const targetWidth = 1080;
+      const targetHeight = 1920;
       
-      // Split text into lines
+      // Crop & Resize original image to exactly 1080x1920
+      const processedBuffer = await sharp(absolutePath)
+        .resize(targetWidth, targetHeight, {
+          fit: 'cover',
+          position: 'center',
+        })
+        .toBuffer();
+      
+      // Split text into lines (max 28 characters per line)
       const words = text.split(/\s+/);
       const lines: string[] = [];
       let currentLine = '';
       for (const word of words) {
-        if ((currentLine + ' ' + word).length > 35) {
+        if ((currentLine + ' ' + word).length > 28) {
           lines.push(currentLine.trim());
           currentLine = word;
         } else {
@@ -464,13 +472,13 @@ Video promptu (videoPrompt) için kurallar:
         lines.push(currentLine.trim());
       }
       
-      const fontSize = Math.round(width * 0.035);
-      const lineHeight = fontSize * 1.4;
-      const padding = fontSize * 1.5;
+      const fontSize = 42;
+      const lineHeight = fontSize * 1.45;
+      const padding = fontSize * 1.2;
       const boxHeight = lines.length * lineHeight + padding * 2;
-      const boxWidth = width * 0.85;
-      const boxX = (width - boxWidth) / 2;
-      const boxY = height - boxHeight - (height * 0.08); // 8% margin from bottom
+      const boxWidth = targetWidth * 0.72; // 72% width (778px) to leave 14% safe margins on sides
+      const boxX = (targetWidth - boxWidth) / 2; // 151px margin on left and right
+      const boxY = targetHeight - boxHeight - (targetHeight * 0.16); // 16% margin from bottom to stay clear of bottom UI
       
       let textElements = '';
       lines.forEach((line, index) => {
@@ -481,12 +489,12 @@ Video promptu (videoPrompt) için kurallar:
           .replace(/>/g, '&gt;')
           .replace(/"/g, '&quot;')
           .replace(/'/g, '&apos;');
-        textElements += `<text x="${width / 2}" y="${yPos}" fill="white" font-family="sans-serif" font-size="${fontSize}px" font-weight="bold" text-anchor="middle">${escapedLine}</text>`;
+        textElements += `<text x="${targetWidth / 2}" y="${yPos}" fill="white" font-family="sans-serif" font-size="${fontSize}px" font-weight="bold" text-anchor="middle">${escapedLine}</text>`;
       });
       
       const svgOverlay = `
-        <svg width="${width}" height="${height}">
-          <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="${fontSize * 0.5}" ry="${fontSize * 0.5}" fill="black" fill-opacity="0.6" />
+        <svg width="${targetWidth}" height="${targetHeight}">
+          <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="${fontSize * 0.5}" ry="${fontSize * 0.5}" fill="black" fill-opacity="0.65" />
           ${textElements}
         </svg>
       `;
@@ -497,7 +505,7 @@ Video promptu (videoPrompt) için kurallar:
       const outputDir = path.dirname(absolutePath);
       const outputAbsolutePath = path.join(outputDir, outputFilename);
       
-      await sharp(absolutePath)
+      await sharp(processedBuffer)
         .composite([{ input: Buffer.from(svgOverlay), blend: 'over' }])
         .toFile(outputAbsolutePath);
         
