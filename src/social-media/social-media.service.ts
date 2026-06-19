@@ -780,16 +780,19 @@ Ayrıca bu paylaşımla birlikte kullanılmak üzere bir yapay zeka video üreti
               );
               await new Promise(resolve => setTimeout(resolve, 5000));
               const checkRes = await fetch(
-                `https://graph.facebook.com/v18.0/${creationId}?fields=status_code,status_message&access_token=${accessToken}`
+                `https://graph.facebook.com/v18.0/${creationId}?fields=status_code,status&access_token=${accessToken}`
               );
               if (checkRes.ok) {
                 const checkData = await checkRes.json();
                 status = checkData.status_code || 'FINISHED';
                 if (status === 'ERROR') {
-                  throw new Error(`Instagram medya işleme hatası: ${checkData.status_message || 'Bilinmeyen hata'}`);
+                  throw new Error(`Instagram medya işleme hatası: ${checkData.status || 'Bilinmeyen hata'}`);
                 }
               } else {
-                this.logger.warn(`Instagram container status check failed (status: ${checkRes.status}). Retrying...`);
+                const errData = await checkRes.json().catch(() => ({}));
+                const errMsg = errData?.error?.message || `Status: ${checkRes.status}`;
+                this.logger.error(`Instagram container status check failed: ${errMsg}`);
+                throw new Error(`Instagram durum kontrolü başarısız: ${errMsg}`);
               }
               attempts++;
             }
