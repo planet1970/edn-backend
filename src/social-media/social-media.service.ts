@@ -49,8 +49,8 @@ Kullanıcının belirteceği konu veya prompt doğrultusunda, belirtilen platfor
 
 Paylaşım yazısı için kurallar:
 1. ${isStory 
-     ? 'Hedef paylaşım türü HİKAYE (STORY) olduğu için paylaşım metni (caption) SON DERECE KISA, ÖZ VE VURUCU OLMALIDIR. Sadece 1 veya 2 çarpıcı slogan/cümle (en fazla 10-15 kelime) yaz. Kesinlikle uzun paragraflar, açıklamalar yazma.'
-     : 'Konu hakkında mümkün olduğunca az bilinen, şaşırtıcı ve ilgi çekici tarihi/kültürel detaylara yer ver. Eğer spesifik bir konu isteniyorsa, o konuyla ilgili derinlemesine ilginç ve detaylı bilgiler sun.'}
+     ? 'Hedef paylaşım türü HİKAYE (STORY) olduğu için paylaşım metni (caption) SON DERECE KISA, ÖZ VE VURUCU OLMALIDIR. Sıradan olmayan, son derece yaratıcı, merak uyandırıcı ve estetik 1 veya 2 çarpıcı slogan/cümle (en fazla 10-15 kelime) yaz. Kesinlikle uzun paragraflar, açıklamalar yazma.'
+     : 'Konu hakkında mümkün olduğunca az bilinen, şaşırtıcı, yaratıcı ve ilgi çekici detaylara yer ver. Eğer spesifik bir konu isteniyorsa, o konuyla ilgili derinlemesine ilginç, özgün ve detaylı bilgiler sun.'}
 2. Paylaşımın sonuna kesinlikle "yorumlar kısmında buluşalım", "yorumlar da buluşalım", "yorumlarınızı bekliyorum" veya benzeri yorum yapma çağrıları (call-to-action) ekleme.
 
 Görsel promptu (imagePrompt) için kurallar:
