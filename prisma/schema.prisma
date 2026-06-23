@@ -630,6 +630,7 @@ model SocialMediaAccount {
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
   posts       SocialMediaPost[]
+  campaigns   SocialMediaCampaign[]
 }
 
 model SocialMediaPost {
@@ -666,15 +667,21 @@ model SocialMediaCampaign {
   lastRunAt    DateTime?
   imageUrl     String?
   posts        SocialMediaPost[]
+  accountId    Int?
+  account      SocialMediaAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  telegramId   Int?
+  telegram     TelegramSetting?    @relation(fields: [telegramId], references: [id], onDelete: SetNull)
 }
 
 model TelegramSetting {
-  id        Int      @id @default(autoincrement())
+  id        Int                   @id @default(autoincrement())
+  name      String                @default("Telegram Hesabı")
   botToken  String
   chatId    String
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  isActive  Boolean               @default(true)
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+  campaigns SocialMediaCampaign[]
 }
 
 model AiModelSetting {

@@ -170,21 +170,33 @@ export class SocialMediaController {
 
   // --- Telegram Settings ---
   @Get('telegram')
-  @ApiOperation({ summary: 'Get current Telegram notification settings' })
-  async getTelegramSetting() {
-    return this.socialMediaService.getTelegramSetting();
+  @ApiOperation({ summary: 'Get all Telegram notification settings' })
+  async getTelegramSettings() {
+    return this.socialMediaService.getTelegramSettings();
   }
 
   @Post('telegram')
-  @ApiOperation({ summary: 'Save or update Telegram notification settings' })
-  async saveTelegramSetting(@Body() body: { botToken: string; chatId: string; isActive: boolean }) {
-    return this.socialMediaService.saveTelegramSetting(body);
+  @ApiOperation({ summary: 'Create a new Telegram notification setting' })
+  async createTelegramSetting(@Body() body: any) {
+    return this.socialMediaService.createTelegramSetting(body);
   }
 
-  @Post('telegram/test')
-  @ApiOperation({ summary: 'Send a test notification to Telegram' })
-  async testTelegram() {
-    return this.socialMediaService.sendTelegramTestMessage();
+  @Put('telegram/:id')
+  @ApiOperation({ summary: 'Update a Telegram notification setting' })
+  async updateTelegramSetting(@Param('id', ParseIntPipe) id: number, @Body() body: any) {
+    return this.socialMediaService.updateTelegramSetting(id, body);
+  }
+
+  @Delete('telegram/:id')
+  @ApiOperation({ summary: 'Delete a Telegram notification setting' })
+  async deleteTelegramSetting(@Param('id', ParseIntPipe) id: number) {
+    return this.socialMediaService.deleteTelegramSetting(id);
+  }
+
+  @Post('telegram/:id/test')
+  @ApiOperation({ summary: 'Send a test notification to a specific Telegram setting' })
+  async testTelegram(@Param('id', ParseIntPipe) id: number) {
+    return this.socialMediaService.sendTelegramTestMessage(id);
   }
 
   // --- AI Model Settings ---

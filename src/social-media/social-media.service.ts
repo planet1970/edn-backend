@@ -15,21 +15,26 @@ export class SocialMediaService implements OnModuleInit {
     private uploadService: UploadService,
   ) {}
 
-  private telegramOffset = 0;
+  private telegramOffsets = new Map<number, number>();
   private isPollingTelegram = false;
 
   async onModuleInit() {
-    // Initialize telegramOffset to latest to avoid reprocessing old updates on server start
+    // Initialize telegramOffsets to latest to avoid reprocessing old updates on server start
     try {
-      const setting = await this.prisma.telegramSetting.findFirst();
-      if (setting && setting.isActive && setting.botToken) {
-        const url = `https://api.telegram.org/bot${setting.botToken}/getUpdates?limit=1&offset=-1`;
-        const res = await fetch(url);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.ok && data.result.length > 0) {
-            this.telegramOffset = data.result[0].update_id + 1;
-            this.logger.log(`Telegram polling initialized. Offset: ${this.telegramOffset}`);
+      const settings = await this.prisma.telegramSetting.findMany({
+        where: { isActive: true }
+      });
+      for (const setting of settings) {
+        if (setting.botToken) {
+          const url = `https://api.telegram.org/bot${setting.botToken}/getUpdates?limit=1&offset=-1`;
+          const res = await fetch(url);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.ok && data.result.length > 0) {
+              const offset = data.result[0].update_id + 1;
+              this.telegramOffsets.set(setting.id, offset);
+              this.logger.log(`Telegram polling initialized for setting #${setting.id} (${setting.name}). Offset: ${offset}`);
+            }
           }
         }
       }
@@ -341,6 +346,31 @@ Video promptu (videoPrompt) için kurallar:
       logs.push('Simülasyon metin ve promptları üretildi.');
     }
 
+    // Ensure we have a valid imagePrompt if it was not returned or is empty
+    if (includeImage && (!imagePrompt || imagePrompt.trim() === '')) {
+      let engKeywords = prompt.toLowerCase();
+      if (engKeywords.includes('cami') || engKeywords.includes('selimiye')) {
+        engKeywords = 'historic Selimiye Mosque in Edirne Turkey';
+      } else if (engKeywords.includes('ciğer') || engKeywords.includes('yemek') || engKeywords.includes('tava')) {
+        engKeywords = 'delicious traditional Turkish Tava Ciger food plate';
+      } else if (engKeywords.includes('nehir') || engKeywords.includes('meriç') || engKeywords.includes('köprü')) {
+        engKeywords = 'historic stone bridge over Meric river in Edirne';
+      } else if (caption) {
+        const lowerCaption = caption.toLowerCase();
+        if (lowerCaption.includes('saray') || lowerCaption.includes('palace')) {
+          engKeywords = 'historic ruins of Edirne Palace';
+        } else if (lowerCaption.includes('cami') || lowerCaption.includes('mosque')) {
+          engKeywords = 'beautiful historic mosque in Edirne';
+        } else {
+          engKeywords = 'beautiful scenic view of Edirne Turkey landmark';
+        }
+      } else {
+        engKeywords = 'historic landmarks and beautiful streets of Edirne Turkey';
+      }
+      imagePrompt = `A professional aesthetic photo representing: ${engKeywords}. Soft focus, atmospheric, artistic style, gentle lighting, award winning photography, no human figures`;
+      logs.push(`Görsel promptu otomatik olarak üretildi: "${imagePrompt}"`);
+    }
+
     // --- 2. Image Generation ---
     if (includeImage) {
       if (customImageConfig) {
@@ -498,20 +528,28 @@ Video promptu (videoPrompt) için kurallar:
       }
 
       if (imageProviderUsed === 'simulation' || !imageUrl) {
-        // Return a beautiful Unsplash stock photo based on the prompt keywords
-        const keywords = prompt
-          .toLowerCase()
-          .replace(/[^a-zA-Z0-9ığüşöç\s]/g, '')
-          .split(' ')
-          .filter(w => w.length > 3)
-          .slice(0, 3)
-          .join(',');
-        const query = keywords ? encodeURIComponent(keywords) : 'edirne,turkey';
-        imageUrl = `https://images.unsplash.com/photo-1564507592333-c60657eea523?auto=format&fit=crop&w=800&q=80`; // Turkey/Mosque
-        if (query.includes('yemek') || query.includes('tava') || query.includes('ciğer')) {
-          imageUrl = `https://images.unsplash.com/photo-1555939594-58d7cb561ad1?auto=format&fit=crop&w=800&q=80`; // Food
+        // Return a beautiful dynamic stock photo from LoremFlickr based on prompt keywords to prevent duplicate images
+        let tags = 'edirne,mosque,turkey';
+        const keywords = prompt.toLowerCase();
+        if (keywords.includes('yemek') || keywords.includes('tava') || keywords.includes('ciğer')) {
+          tags = 'food,turkish';
+        } else if (keywords.includes('nehir') || keywords.includes('meriç') || keywords.includes('köprü')) {
+          tags = 'river,bridge,turkey';
+        } else if (keywords.includes('saray') || keywords.includes('palace')) {
+          tags = 'palace,history';
+        } else {
+          const extracted = prompt
+            .toLowerCase()
+            .replace(/[^a-zA-Z0-9ığüşöç\s]/g, '')
+            .split(/\s+/)
+            .filter(w => w.length > 3)
+            .slice(0, 3);
+          if (extracted.length > 0) {
+            tags = extracted.join(',');
+          }
         }
-        logs.push('Simüle edilmiş Unsplash görseli atandı.');
+        imageUrl = `https://loremflickr.com/800/800/${encodeURIComponent(tags)}?random=${Date.now()}`;
+        logs.push(`Simüle edilmiş dinamik Flickr görseli atandı (Etiketler: ${tags}).`);
       }
     }
 
@@ -1734,6 +1772,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         timeOfDay: data.timeOfDay || '09:00',
         isActive: data.isActive !== undefined ? data.isActive : true,
         imageUrl: imageUrl || null,
+        accountId: data.accountId ? parseInt(String(data.accountId), 10) : null,
       },
     });
   }
@@ -1755,6 +1794,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         timeOfDay: data.timeOfDay,
         isActive: data.isActive,
         imageUrl: imageUrl !== undefined ? imageUrl : undefined,
+        accountId: data.accountId !== undefined ? (data.accountId ? parseInt(String(data.accountId), 10) : null) : undefined,
       },
     });
   }
@@ -1821,6 +1861,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         postType: campaign.postType,
         status: 'PENDING_APPROVAL',
         campaignId: campaign.id,
+        accountId: campaign.accountId,
       },
     });
 
@@ -1846,7 +1887,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
           ],
         ],
       };
-      await this.sendTelegramNotification(campaignMsg, replyMarkup);
+      await this.sendTelegramNotification(campaignMsg, replyMarkup, campaign.telegramId);
     } catch (tgError) {
       this.logger.error('Telegram notification failed for campaign test trigger:', tgError);
     }
@@ -1966,6 +2007,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
             postType: campaign.postType,
             status: 'PENDING_APPROVAL',
             campaignId: campaign.id,
+            accountId: campaign.accountId,
           },
         });
 
@@ -1994,7 +2036,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
           ]
         };
 
-        await this.sendTelegramNotification(campaignMsg, replyMarkup);
+        await this.sendTelegramNotification(campaignMsg, replyMarkup, campaign.telegramId);
 
       } catch (error) {
         this.logger.error(`Kampanya (#${campaign.id}) yürütülürken hata:`, error);
@@ -2002,75 +2044,85 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
           `<b>Kampanya:</b> ${campaign.title} (#${campaign.id})\n` +
           `<b>Platform:</b> ${campaign.platform}\n` +
           `<b>Hata Nedeni:</b> <code>${error.message}</code>`;
-        await this.sendTelegramNotification(errMsg);
+        await this.sendTelegramNotification(errMsg, null, campaign.telegramId);
       }
     }
   }
 
   // --- Telegram Settings CRUD & Notifications ---
-  async getTelegramSetting() {
-    let setting = await this.prisma.telegramSetting.findFirst();
-    if (!setting) {
-      // Return a blank template
-      setting = {
-        id: 0,
-        botToken: '',
-        chatId: '',
-        isActive: false,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-    }
-    return setting;
+  // --- Telegram Settings CRUD & Notifications ---
+  async getTelegramSettings() {
+    return this.prisma.telegramSetting.findMany({
+      orderBy: { createdAt: 'desc' }
+    });
   }
 
-  async saveTelegramSetting(data: { botToken: string; chatId: string; isActive: boolean }) {
-    const existing = await this.prisma.telegramSetting.findFirst();
-    if (existing) {
-      return this.prisma.telegramSetting.update({
-        where: { id: existing.id },
-        data: {
-          botToken: data.botToken.trim(),
-          chatId: data.chatId.trim(),
-          isActive: data.isActive,
-        },
-      });
-    } else {
-      return this.prisma.telegramSetting.create({
-        data: {
-          botToken: data.botToken.trim(),
-          chatId: data.chatId.trim(),
-          isActive: data.isActive,
-        },
-      });
-    }
+  async createTelegramSetting(data: any) {
+    return this.prisma.telegramSetting.create({
+      data: {
+        name: data.name ? data.name.trim() : 'Telegram Hesabı',
+        botToken: data.botToken.trim(),
+        chatId: data.chatId.trim(),
+        isActive: data.isActive !== undefined ? data.isActive : true,
+      }
+    });
   }
 
-  async sendTelegramNotification(message: string, replyMarkup?: any) {
+  async updateTelegramSetting(id: number, data: any) {
+    return this.prisma.telegramSetting.update({
+      where: { id },
+      data: {
+        name: data.name ? data.name.trim() : undefined,
+        botToken: data.botToken ? data.botToken.trim() : undefined,
+        chatId: data.chatId ? data.chatId.trim() : undefined,
+        isActive: data.isActive !== undefined ? data.isActive : undefined,
+      }
+    });
+  }
+
+  async deleteTelegramSetting(id: number) {
+    return this.prisma.telegramSetting.delete({
+      where: { id }
+    });
+  }
+
+  async sendTelegramNotification(message: string, replyMarkup?: any, specificTelegramId?: number | null) {
     try {
-      const setting = await this.prisma.telegramSetting.findFirst();
-      if (!setting || !setting.isActive || !setting.botToken || !setting.chatId) {
-        return;
+      let settings: any[] = [];
+      if (specificTelegramId) {
+        const single = await this.prisma.telegramSetting.findUnique({
+          where: { id: specificTelegramId }
+        });
+        if (single && single.isActive) {
+          settings = [single];
+        }
+      } else {
+        settings = await this.prisma.telegramSetting.findMany({
+          where: { isActive: true }
+        });
       }
 
-      const url = `https://api.telegram.org/bot${setting.botToken}/sendMessage`;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: setting.chatId,
-          text: message,
-          parse_mode: 'HTML',
-          ...(replyMarkup && { reply_markup: replyMarkup }),
-        }),
-      });
+      for (const setting of settings) {
+        if (!setting.botToken || !setting.chatId) continue;
+        const url = `https://api.telegram.org/bot${setting.botToken}/sendMessage`;
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: setting.chatId,
+            text: message,
+            parse_mode: 'HTML',
+            ...(replyMarkup && { reply_markup: replyMarkup }),
+          }),
+        });
 
-      if (!response.ok) {
-        const errText = await response.text();
-        this.logger.error(`Telegram bildirim gönderme hatası: ${errText}`);
+        if (!response.ok) {
+          const errText = await response.text();
+          this.logger.error(`Telegram notification error for setting #${setting.id} (${setting.name}): ${errText}`);
+        }
       }
     } catch (err) {
-      this.logger.error('Telegram bildirim fonksiyonunda beklenmeyen hata:', err);
+      this.logger.error('Unexpected error in sendTelegramNotification:', err);
     }
   }
 
@@ -2080,143 +2132,155 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
     this.isPollingTelegram = true;
 
     try {
-      const setting = await this.prisma.telegramSetting.findFirst();
-      if (!setting || !setting.isActive || !setting.botToken) {
-        this.isPollingTelegram = false;
-        return;
-      }
+      const settings = await this.prisma.telegramSetting.findMany({
+        where: { isActive: true }
+      });
 
-      const url = `https://api.telegram.org/bot${setting.botToken}/getUpdates?offset=${this.telegramOffset}&timeout=3`;
-      const response = await fetch(url);
-      if (!response.ok) {
-        this.isPollingTelegram = false;
-        return;
-      }
+      for (const setting of settings) {
+        if (!setting.botToken) continue;
+        const offset = this.telegramOffsets.get(setting.id) || 0;
+        const url = `https://api.telegram.org/bot${setting.botToken}/getUpdates?offset=${offset}&timeout=2`;
+        try {
+          const response = await fetch(url);
+          if (!response.ok) continue;
 
-      const data = await response.json();
-      if (data.ok && data.result.length > 0) {
-        for (const update of data.result) {
-          this.telegramOffset = update.update_id + 1;
+          const data = await response.json();
+          if (data.ok && data.result.length > 0) {
+            for (const update of data.result) {
+              this.telegramOffsets.set(setting.id, update.update_id + 1);
 
-          if (update.callback_query) {
-            const query = update.callback_query;
-            const callbackData = query.data;
-            const callbackQueryId = query.id;
-            const chatId = query.message.chat.id;
-            const messageId = query.message.message_id;
+              if (update.callback_query) {
+                const query = update.callback_query;
+                const callbackData = query.data;
+                const callbackQueryId = query.id;
+                const chatId = query.message.chat.id;
+                const messageId = query.message.message_id;
 
-            if (callbackData.startsWith('approve_post_')) {
-              const postId = parseInt(callbackData.replace('approve_post_', ''), 10);
-              
-              await fetch(`https://api.telegram.org/bot${setting.botToken}/answerCallbackQuery`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  callback_query_id: callbackQueryId,
-                  text: 'Gönderi onaylandı, paylaşılıyor...',
-                }),
-              });
+                if (callbackData.startsWith('approve_post_') || callbackData.startsWith('approve_publish_')) {
+                  const postId = parseInt(
+                    callbackData.replace('approve_post_', '').replace('approve_publish_', ''),
+                    10
+                  );
 
-              try {
-                const post = await this.prisma.socialMediaPost.findUnique({ where: { id: postId } });
-                if (!post) {
-                  throw new Error('Gönderi bulunamadı.');
-                }
-                if (post.status === 'PUBLISHED' || post.status === 'PUBLISHING') {
-                  await fetch(`https://api.telegram.org/bot${setting.botToken}/editMessageText`, {
+                  await fetch(`https://api.telegram.org/bot${setting.botToken}/answerCallbackQuery`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                      chat_id: chatId,
-                      message_id: messageId,
-                      text: `✅ <b>Gönderi zaten paylaşıldı veya paylaşım sırasında.</b>\n\nPlatform: ${post.platform}\nMetin: ${post.caption}`,
-                      parse_mode: 'HTML',
+                      callback_query_id: callbackQueryId,
+                      text: 'Gönderi onaylandı, paylaşılıyor...',
                     }),
                   });
-                  continue;
-                }
 
-                await fetch(`https://api.telegram.org/bot${setting.botToken}/editMessageText`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    chat_id: chatId,
-                    message_id: messageId,
-                    text: `⌛ <b>Gönderi onaylandı ve paylaşım başlatıldı...</b>\n\n<b>Platform:</b> ${post.platform}\n<b>Tür:</b> ${post.postType}\n<b>Metin:</b>\n<i>${post.caption}</i>`,
-                    parse_mode: 'HTML',
-                  }),
-                });
+                  try {
+                    const post = await this.prisma.socialMediaPost.findUnique({ where: { id: postId } });
+                    if (!post) throw new Error('Gönderi bulunamadı.');
 
-                await this.publishPost(postId);
-              } catch (err) {
-                this.logger.error(`Telegram onayıyla paylaşım başarısız (Post #${postId}):`, err);
-                await fetch(`https://api.telegram.org/bot${setting.botToken}/sendMessage`, {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    chat_id: chatId,
-                    text: `❌ <b>Hata:</b> Post #${postId} paylaşılamadı. Detay: ${err.message}`,
-                    parse_mode: 'HTML',
-                  }),
-                });
-              }
-            } else if (callbackData.startsWith('reject_post_')) {
-              const postId = parseInt(callbackData.replace('reject_post_', ''), 10);
-              
-              await fetch(`https://api.telegram.org/bot${setting.botToken}/answerCallbackQuery`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  callback_query_id: callbackQueryId,
-                  text: 'Gönderi reddedildi.',
-                }),
-              });
+                    if (post.status === 'PUBLISHED' || post.status === 'PUBLISHING') {
+                      await fetch(`https://api.telegram.org/bot${setting.botToken}/editMessageText`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          chat_id: chatId,
+                          message_id: messageId,
+                          text: query.message.text + '\n\n✅ <b>Paylaşım Zaten Yapıldı.</b>',
+                          parse_mode: 'HTML',
+                        }),
+                      });
+                      continue;
+                    }
 
-              try {
-                const post = await this.prisma.socialMediaPost.findUnique({ where: { id: postId } });
-                if (post) {
-                  await this.prisma.socialMediaPost.update({
-                    where: { id: postId },
-                    data: { status: 'REJECTED' },
-                  });
-                  
-                  await fetch(`https://api.telegram.org/bot${setting.botToken}/editMessageText`, {
+                    // Update status to PUBLISHING
+                    await this.prisma.socialMediaPost.update({
+                      where: { id: postId },
+                      data: { status: 'PUBLISHING' },
+                    });
+
+                    // Edit telegram message text
+                    await fetch(`https://api.telegram.org/bot${setting.botToken}/editMessageText`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        chat_id: chatId,
+                        message_id: messageId,
+                        text: query.message.text + '\n\n🔄 <b>Yayınlanıyor (Sıraya Alındı)...</b>',
+                        parse_mode: 'HTML',
+                      }),
+                    });
+
+                    // Run publish in background async
+                    this.publishPost(postId).catch(err => {
+                      this.logger.error(`Error publishing post ${postId} via telegram callback:`, err);
+                    });
+
+                  } catch (err) {
+                    this.logger.error(`Approve callback failed for post ${postId}:`, err);
+                    await fetch(`https://api.telegram.org/bot${setting.botToken}/sendMessage`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        chat_id: chatId,
+                        text: `⚠️ Onaylama başarısız oldu: ${err.message}`,
+                      }),
+                    });
+                  }
+                } else if (callbackData.startsWith('reject_post_') || callbackData.startsWith('reject_delete_')) {
+                  const postId = parseInt(
+                    callbackData.replace('reject_post_', '').replace('reject_delete_', ''),
+                    10
+                  );
+
+                  await fetch(`https://api.telegram.org/bot${setting.botToken}/answerCallbackQuery`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                      chat_id: chatId,
-                      message_id: messageId,
-                      text: `❌ <b>Gönderi Reddedildi (Paylaşım İptal Edildi).</b>\n\n<b>Platform:</b> ${post.platform}\n<b>Metin:</b>\n<i>${post.caption}</i>`,
-                      parse_mode: 'HTML',
+                      callback_query_id: callbackQueryId,
+                      text: 'Gönderi reddedildi ve silindi.',
                     }),
                   });
+
+                  try {
+                    await this.prisma.socialMediaPost.delete({ where: { id: postId } });
+                    await fetch(`https://api.telegram.org/bot${setting.botToken}/editMessageText`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        chat_id: chatId,
+                        message_id: messageId,
+                        text: query.message.text + '\n\n❌ <b>Gönderi Reddedildi ve Silindi.</b>',
+                        parse_mode: 'HTML',
+                      }),
+                    });
+                  } catch (err) {
+                    this.logger.error(`Reject callback failed for post ${postId}:`, err);
+                  }
                 }
-              } catch (err) {
-                this.logger.error(`Post reddetme hatası:`, err);
               }
             }
           }
+        } catch (fetchErr) {
+          this.logger.error(`Error polling telegram setting #${setting.id}:`, fetchErr);
         }
       }
     } catch (err) {
-      this.logger.error('Telegram polling error:', err);
+      this.logger.error('Telegram polling cron job error:', err);
     } finally {
       this.isPollingTelegram = false;
     }
   }
 
-  async sendTelegramTestMessage() {
+  async sendTelegramTestMessage(id: number) {
     try {
-      const setting = await this.prisma.telegramSetting.findFirst();
+      const setting = await this.prisma.telegramSetting.findUnique({
+        where: { id }
+      });
       if (!setting || !setting.botToken || !setting.chatId) {
         return {
           success: false,
-          message: 'Telegram ayarları henüz yapılandırılmamış veya eksik. Lütfen önce bilgileri kaydedin.',
+          message: 'Telegram ayarı bulunamadı veya eksik.',
         };
       }
 
-      const testMsg = `🔔 <b>SMYP Telegram Bildirim Testi</b>\n\nBu mesaj Telegram entegrasyonunuzun başarıyla çalıştığını göstermektedir.\n\n📅 Tarih: ${new Date().toLocaleString('tr-TR')}`;
-      
+      const testMsg = `🔔 <b>SMYP Telegram Bildirim Testi (${setting.name})</b>\n\nBu mesaj Telegram entegrasyonunuzun başarıyla çalıştığını göstermektedir.\n\n📅 Tarih: ${new Date().toLocaleString('tr-TR')}`;
       const url = `https://api.telegram.org/bot${setting.botToken}/sendMessage`;
       const response = await fetch(url, {
         method: 'POST',
@@ -2230,18 +2294,13 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
 
       if (!response.ok) {
         const errText = await response.text();
-        let detail = errText;
-        try {
-          const parsed = JSON.parse(errText);
-          detail = parsed.description || errText;
-        } catch {}
         return {
           success: false,
-          message: `Telegram Bildirim Gönderimi Başarısız: ${detail}`,
+          message: `Telegram API Hatası: ${errText}`,
         };
       }
 
-      return { success: true, message: 'Test mesajı Telegram hesabınıza başarıyla gönderildi.' };
+      return { success: true, message: `${setting.name} için test mesajı başarıyla gönderildi!` };
     } catch (error) {
       return {
         success: false,
