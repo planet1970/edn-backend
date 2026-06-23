@@ -497,7 +497,19 @@ Video promptu (videoPrompt) için kurallar:
           imageProviderUsed = 'simulation';
         } else {
           try {
+            // Eğer imagePrompt boş gelmişse, metinden (caption) veya prompt'tan bir tane oluşturalım
+            let finalImagePrompt = imagePrompt;
+            if (!finalImagePrompt || finalImagePrompt.trim() === '') {
+              finalImagePrompt = `A high quality, atmospheric, aesthetic and highly detailed image representing: ${caption.substring(0, 100) || prompt}. No human figures, soft lighting.`;
+            }
+
+            // Benzersizlik katmak için rastgele bir seed veya benzersiz bir string ekleyelim ki hep aynı görsel üretilmesin
+            const uniquePrompt = `${finalImagePrompt.trim()} [Variation: ${Math.random().toString(36).substring(7)}]`;
+
             const modelPath = activeImageModel || 'black-forest-labs/FLUX.1-schnell';
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 saniye zaman aşımı (Nginx 504'e düşmemek için)
+            
             const response = await fetch(
               `https://router.huggingface.co/hf-inference/models/${modelPath}`,
               {
@@ -506,9 +518,11 @@ Video promptu (videoPrompt) için kurallar:
                   'Content-Type': 'application/json',
                   Authorization: `Bearer ${hfKey}`,
                 },
-                body: JSON.stringify({ inputs: imagePrompt }),
+                body: JSON.stringify({ inputs: uniquePrompt }),
+                signal: controller.signal,
               },
             );
+            clearTimeout(timeoutId);
 
             if (!response.ok) {
               const errText = await response.text();
