@@ -562,8 +562,8 @@ Video promptu (videoPrompt) için kurallar:
             tags = extracted.join(',');
           }
         }
-        imageUrl = `https://loremflickr.com/800/800/${encodeURIComponent(tags)}?random=${Date.now()}`;
-        logs.push(`Simüle edilmiş dinamik Flickr görseli atandı (Etiketler: ${tags}).`);
+        imageUrl = `https://picsum.photos/800/800?random=${Date.now()}`;
+        logs.push(`Simüle edilmiş dinamik görsel atandı (Picsum).`);
       }
     }
 
