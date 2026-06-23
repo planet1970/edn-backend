@@ -2054,6 +2054,14 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
 
       } catch (error) {
         this.logger.error(`Kampanya (#${campaign.id}) yürütülürken hata:`, error);
+        try {
+          await this.prisma.socialMediaCampaign.update({
+            where: { id: campaign.id },
+            data: { lastRunAt: campaign.lastRunAt },
+          });
+        } catch (dbError) {
+          this.logger.error(`Kampanya (#${campaign.id}) lastRunAt geri alma hatası:`, dbError);
+        }
         const errMsg = `❌ <b>KAMPANYA YÜRÜTÜLÜRKEN HATA OLUŞTU</b>\n\n` +
           `<b>Kampanya:</b> ${campaign.title} (#${campaign.id})\n` +
           `<b>Platform:</b> ${campaign.platform}\n` +
