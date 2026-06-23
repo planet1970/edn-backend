@@ -135,29 +135,15 @@ export class SocialMediaService implements OnModuleInit {
     const isStory = postType === 'STORY';
 
     // System instruction for Text AIs
-    const systemInstruction = `Sen profesyonel bir sosyal medya içerik üreticisisin. 
-Kullanıcının belirteceği konu veya prompt doğrultusunda, belirtilen platform ve ses tonuna uygun, dikkat çekici, emojilerle zenginleştirilmiş ve popüler hashtag'leri içeren bir paylaşım yazısı hazırla.
-
-Paylaşım yazısı için kurallar:
-1. ${isStory 
-     ? 'Hedef paylaşım türü HİKAYE (STORY) olduğu için paylaşım metni (caption) SON DERECE KISA, ÖZ VE VURUCU OLMALIDIR. Sıradan olmayan, son derece yaratıcı, merak uyandırıcı ve estetik 1 veya 2 çarpıcı slogan/cümle (en fazla 10-15 kelime) yaz. Kesinlikle uzun paragraflar, açıklamalar yazma.'
-     : 'Konu hakkında mümkün olduğunca az bilinen, şaşırtıcı, yaratıcı ve ilgi çekici detaylara yer ver. Eğer spesifik bir konu isteniyorsa, o konuyla ilgili derinlemesine ilginç, özgün ve detaylı bilgiler sun.'}
-2. Paylaşımın sonuna kesinlikle "yorumlar kısmında buluşalım", "yorumlar da buluşalım", "yorumlarınızı bekliyorum" veya benzeri yorum yapma çağrıları (call-to-action) ekleme.
-
-Görsel promptu (imagePrompt) için kurallar:
-1. Görsel üretim promptunu detaylı ve İngilizce olarak yaz.
-2. Görselde insan figürü/kullanımı olmamasına (insan figürlerinden kaçınmaya) özen göster.
-3. Görsel tarzında sert/net çizgiler ve yapay parlaklıklar yerine; daha yumuşak, soft, atmosferik, sanatsal, rüya gibi ve estetik (soft focus, atmospheric, artistic style, gentle lighting, painterly details, avoid harsh outlines, no human figures) bir hava tarif et.
-
-Video promptu (videoPrompt) için kurallar:
-1. Video üretim promptunu detaylı ve İngilizce olarak yaz.
-
-Çıktıyı kesinlikle geçerli bir JSON formatında ver. JSON formatı şu şekilde olmalıdır:
+    const systemInstruction = `You are a social media post generator.
+You must output a JSON object containing:
 {
-  "caption": "Sosyal medya gönderi metni...",
-  "imagePrompt": "İngilizce görsel üretim promptu...",
-  "videoPrompt": "İngilizce video üretim promptu..."
-}`;
+  "caption": "The post caption in the user's requested language. Use the user's prompt exactly as the instruction to generate this text, formatted for the platform (${platform}) and tone (${tone}). Do not append any call-to-action like 'comments down below'.",
+  "imagePrompt": "A detailed English description of an image that fits the generated caption.",
+  "videoPrompt": "A detailed English description of a video that fits the generated caption."
+}
+
+Do not add any other stylistic rules, presets, or constraints. Return ONLY a valid JSON object.`;
 
     // --- 1. Text Generation ---
     if (customTextConfig) {
@@ -349,26 +335,7 @@ Video promptu (videoPrompt) için kurallar:
 
     // Ensure we have a valid imagePrompt if it was not returned or is empty
     if (includeImage && (!imagePrompt || imagePrompt.trim() === '')) {
-      let engKeywords = prompt.toLowerCase();
-      if (engKeywords.includes('cami') || engKeywords.includes('selimiye')) {
-        engKeywords = 'historic Selimiye Mosque in Edirne Turkey';
-      } else if (engKeywords.includes('ciğer') || engKeywords.includes('yemek') || engKeywords.includes('tava')) {
-        engKeywords = 'delicious traditional Turkish Tava Ciger food plate';
-      } else if (engKeywords.includes('nehir') || engKeywords.includes('meriç') || engKeywords.includes('köprü')) {
-        engKeywords = 'historic stone bridge over Meric river in Edirne';
-      } else if (caption) {
-        const lowerCaption = caption.toLowerCase();
-        if (lowerCaption.includes('saray') || lowerCaption.includes('palace')) {
-          engKeywords = 'historic ruins of Edirne Palace';
-        } else if (lowerCaption.includes('cami') || lowerCaption.includes('mosque')) {
-          engKeywords = 'beautiful historic mosque in Edirne';
-        } else {
-          engKeywords = 'beautiful scenic view of Edirne Turkey landmark';
-        }
-      } else {
-        engKeywords = 'historic landmarks and beautiful streets of Edirne Turkey';
-      }
-      imagePrompt = `A professional aesthetic photo representing: ${engKeywords}. Soft focus, atmospheric, artistic style, gentle lighting, award winning photography, no human figures`;
+      imagePrompt = `A photo representing: ${caption || prompt}`;
       logs.push(`Görsel promptu otomatik olarak üretildi: "${imagePrompt}"`);
     }
 
@@ -507,7 +474,7 @@ Video promptu (videoPrompt) için kurallar:
             // Eğer imagePrompt boş gelmişse, metinden (caption) veya prompt'tan bir tane oluşturalım
             let finalImagePrompt = imagePrompt;
             if (!finalImagePrompt || finalImagePrompt.trim() === '') {
-              finalImagePrompt = `A high quality, atmospheric, aesthetic and highly detailed image representing: ${caption.substring(0, 100) || prompt}. No human figures, soft lighting.`;
+              finalImagePrompt = `A high quality image representing: ${caption.substring(0, 100) || prompt}`;
             }
 
             // Benzersizlik katmak için rastgele bir seed veya benzersiz bir string ekleyelim ki hep aynı görsel üretilmesin
@@ -518,7 +485,7 @@ Video promptu (videoPrompt) için kurallar:
             const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 saniye zaman aşımı (Nginx 504'e düşmemek için)
             
             const response = await fetch(
-              `https://router.huggingface.co/hf-inference/models/${modelPath}`,
+              `https://api-inference.huggingface.co/models/${modelPath}`,
               {
                 method: 'POST',
                 headers: {
