@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpCode, HttpStatus, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpCode, HttpStatus, UseGuards, UseInterceptors, UploadedFile, HttpException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { SocialMediaService } from './social-media.service';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
@@ -164,7 +164,16 @@ export class SocialMediaController {
   @Post('campaigns/:id/test-trigger')
   @ApiOperation({ summary: 'Manually trigger a campaign run to generate a test post' })
   async testTriggerCampaign(@Param('id', ParseIntPipe) id: number) {
-    return this.socialMediaService.testTriggerCampaign(id);
+    try {
+      return await this.socialMediaService.testTriggerCampaign(id);
+    } catch (error) {
+      throw new HttpException({
+        status: HttpStatus.INTERNAL_SERVER_ERROR,
+        error: 'Kampanya test tetikleme hatası',
+        message: error.message,
+        stack: error.stack,
+      }, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
   }
 
 
