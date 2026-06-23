@@ -130,6 +130,7 @@ export class SocialMediaService implements OnModuleInit {
     let textProviderUsed = customTextConfig ? customTextConfig.name : activeTextProvider;
     let imageProviderUsed = customImageConfig ? customImageConfig.name : activeImageProvider;
     let videoProviderUsed = videoProvider;
+    let imageGenerationError = '';
 
     const isStory = postType === 'STORY';
 
@@ -409,6 +410,7 @@ Video promptu (videoPrompt) için kurallar:
           this.checkAiTokenError(error, `Özel Görsel Modeli (${customImageConfig.name})`);
           logs.push(`Özel model görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
           imageProviderUsed = 'simulation';
+          imageGenerationError = `Özel model (${customImageConfig.name}) hatası: ${error.message}`;
         }
       } else if (activeImageProvider === 'dalle') {
         const openAiKey = aiSettings.openAiKey || process.env.OPENAI_API_KEY;
@@ -416,6 +418,7 @@ Video promptu (videoPrompt) için kurallar:
         if (!openAiKey) {
           logs.push('OPENAI_API_KEY bulunamadı. DALL-E görsel üretimi için simülasyon moduna geçiliyor.');
           imageProviderUsed = 'simulation';
+          imageGenerationError = 'OPENAI_API_KEY bulunamadı.';
         } else {
           try {
             const response = await fetch(`${openAiUrl}/v1/images/generations`, {
@@ -444,6 +447,7 @@ Video promptu (videoPrompt) için kurallar:
             this.checkAiTokenError(error, 'OpenAI DALL-E 3 (Görsel)');
             logs.push(`DALL-E görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
             imageProviderUsed = 'simulation';
+            imageGenerationError = `DALL-E hatası: ${error.message}`;
           }
         }
       } else if (activeImageProvider === 'stability') {
@@ -451,6 +455,7 @@ Video promptu (videoPrompt) için kurallar:
         if (!stabilityKey) {
           logs.push('STABILITY_API_KEY bulunamadı. Stability AI görsel üretimi için simülasyon moduna geçiliyor.');
           imageProviderUsed = 'simulation';
+          imageGenerationError = 'STABILITY_API_KEY bulunamadı.';
         } else {
           try {
             const response = await fetch(
@@ -488,6 +493,7 @@ Video promptu (videoPrompt) için kurallar:
             this.checkAiTokenError(error, 'Stability AI (Görsel)');
             logs.push(`Stability AI görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
             imageProviderUsed = 'simulation';
+            imageGenerationError = `Stability AI hatası: ${error.message}`;
           }
         }
       } else if (activeImageProvider === 'huggingface') {
@@ -495,6 +501,7 @@ Video promptu (videoPrompt) için kurallar:
         if (!hfKey) {
           logs.push('HUGGINGFACE_API_KEY bulunamadı. Hugging Face görsel üretimi için simülasyon moduna geçiliyor.');
           imageProviderUsed = 'simulation';
+          imageGenerationError = 'HUGGINGFACE_API_KEY bulunamadı.';
         } else {
           try {
             // Eğer imagePrompt boş gelmişse, metinden (caption) veya prompt'tan bir tane oluşturalım
@@ -537,6 +544,7 @@ Video promptu (videoPrompt) için kurallar:
             this.checkAiTokenError(error, 'Hugging Face FLUX (Görsel)');
             logs.push(`Hugging Face görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
             imageProviderUsed = 'simulation';
+            imageGenerationError = `Hugging Face hatası: ${error.message}`;
           }
         }
       }
@@ -615,6 +623,7 @@ Video promptu (videoPrompt) için kurallar:
       textProviderUsed,
       imageProviderUsed,
       videoProviderUsed,
+      imageGenerationError,
       isSimulated: textProviderUsed === 'simulation' && imageProviderUsed === 'simulation' && videoProviderUsed === 'simulation',
       logs
     };
@@ -1876,6 +1885,9 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         status: 'PENDING_APPROVAL',
         campaignId: campaign.id,
         accountId: campaign.accountId,
+        errorMessage: (genResult.imageProviderUsed === 'simulation' && !campaign.imageUrl)
+          ? `Yapay zeka görseli üretilemedi (${genResult.imageGenerationError || 'Bilinmeyen hata'}). Hazır/stok görsel atandı.`
+          : null,
       },
     });
 
@@ -1884,13 +1896,21 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
       mediaLink = `\n🖼️ <b>Görsel:</b> <a href="${this.getAbsoluteUrl(newPost.imageUrl)}">Görüntüle</a>\n`;
     }
 
+    let warningText = '';
+    if (genResult.imageProviderUsed === 'simulation' && !campaign.imageUrl) {
+      warningText = `\n⚠️ <b>YAPAY ZEKA GÖRSELİ ÜRETİLEMEDİ!</b>\n` +
+        `• <b>Durum:</b> Hazır/Stok görsel atandı.\n` +
+        `• <b>Hata Nedeni:</b> <code>${genResult.imageGenerationError || 'Bilinmeyen hata / API Limiti'}</code>\n`;
+    }
+
     const campaignMsg = `🔔 <b>ZAMANLANMIŞ GÖREV TEST ÇALIŞTIRMASI (ONAY BEKLİYOR)</b>\n\n` +
       `<b>Kampanya:</b> ${campaign.title}\n` +
       `<b>Platform:</b> ${campaign.platform}\n` +
       `<b>Tür:</b> ${campaign.postType}\n` +
       `<b>Konu/Talimat:</b> <i>"${campaign.prompt}"</i>\n\n` +
       `<b>Metin:</b>\n<i>${newPost.caption}</i>\n` +
-      mediaLink;
+      mediaLink +
+      warningText;
 
     try {
       const replyMarkup = {
@@ -2022,6 +2042,9 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
             status: 'PENDING_APPROVAL',
             campaignId: campaign.id,
             accountId: campaign.accountId,
+            errorMessage: (genResult.imageProviderUsed === 'simulation' && !campaign.imageUrl)
+              ? `Yapay zeka görseli üretilemedi (${genResult.imageGenerationError || 'Bilinmeyen hata'}). Hazır/stok görsel atandı.`
+              : null,
           },
         });
 
@@ -2032,13 +2055,21 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
           mediaLink = `\n🖼️ <b>Görsel:</b> <a href="${this.getAbsoluteUrl(newPost.imageUrl)}">Görüntüle</a>\n`;
         }
 
+        let warningText = '';
+        if (genResult.imageProviderUsed === 'simulation' && !campaign.imageUrl) {
+          warningText = `\n⚠️ <b>YAPAY ZEKA GÖRSELİ ÜRETİLEMEDİ!</b>\n` +
+            `• <b>Durum:</b> Hazır/Stok görsel atandı.\n` +
+            `• <b>Hata Nedeni:</b> <code>${genResult.imageGenerationError || 'Bilinmeyen hata / API Limiti'}</code>\n`;
+        }
+
         const campaignMsg = `🔔 <b>ZAMANLANMIŞ GÖREV (ONAY BEKLİYOR)</b>\n\n` +
           `<b>Kampanya:</b> ${campaign.title}\n` +
           `<b>Platform:</b> ${campaign.platform}\n` +
           `<b>Tür:</b> ${campaign.postType}\n` +
           `<b>Konu/Talimat:</b> <i>"${campaign.prompt}"</i>\n\n` +
           `<b>Metin:</b>\n<i>${newPost.caption}</i>\n` +
-          mediaLink;
+          mediaLink +
+          warningText;
 
         // Interactive inline buttons for Telegram
         const replyMarkup = {
