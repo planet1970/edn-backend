@@ -1,15 +1,79 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { UploadService } from '../common/upload/upload.service';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as sharp from 'sharp';
 
 @Injectable()
-export class SocialMediaService {
+export class SocialMediaService implements OnModuleInit {
   private readonly logger = new Logger(SocialMediaService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private uploadService: UploadService,
+  ) {}
+
+  private telegramOffset = 0;
+  private isPollingTelegram = false;
+
+  async onModuleInit() {
+    // Initialize telegramOffset to latest to avoid reprocessing old updates on server start
+    try {
+      const setting = await this.prisma.telegramSetting.findFirst();
+      if (setting && setting.isActive && setting.botToken) {
+        const url = `https://api.telegram.org/bot${setting.botToken}/getUpdates?limit=1&offset=-1`;
+        const res = await fetch(url);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.ok && data.result.length > 0) {
+            this.telegramOffset = data.result[0].update_id + 1;
+            this.logger.log(`Telegram polling initialized. Offset: ${this.telegramOffset}`);
+          }
+        }
+      }
+    } catch (err) {
+      this.logger.error('Telegram offset init failed:', err);
+    }
+  }
+
+  async uploadPostMedia(postId: number, file: Express.Multer.File) {
+    const post = await this.prisma.socialMediaPost.findUnique({
+      where: { id: postId },
+    });
+    if (!post) {
+      throw new Error('Gönderi bulunamadı.');
+    }
+
+    const isVideo = file.mimetype.startsWith('video/');
+
+    if (isVideo) {
+      const videoUrl = await this.uploadService.handleFile(file, 'social-posts', post.videoUrl || undefined);
+      // Clean up old image if there was one
+      if (post.imageUrl) {
+        try {
+          await this.uploadService.deleteFile(post.imageUrl);
+        } catch {}
+      }
+      return this.prisma.socialMediaPost.update({
+        where: { id: postId },
+        data: { videoUrl, imageUrl: null },
+      });
+    } else {
+      const imageUrl = await this.uploadService.handleFile(file, 'social-posts', post.imageUrl || undefined);
+      // Clean up old video if there was one
+      if (post.videoUrl) {
+        try {
+          await this.uploadService.deleteFile(post.videoUrl);
+        } catch {}
+      }
+      return this.prisma.socialMediaPost.update({
+        where: { id: postId },
+        data: { imageUrl, videoUrl: null },
+      });
+    }
+  }
 
   private getAbsoluteUrl(url?: string): string {
     if (!url) return '';
@@ -17,28 +81,49 @@ export class SocialMediaService {
     const baseUrl = (process.env.BACKEND_URL || 'https://api.edirnego.com').replace(/\/$/, '');
     const cleanUrl = url.startsWith('/') ? url : `/${url}`;
     return `${baseUrl}${cleanUrl}`;
-  }
-
-  // 1. Generate post content using specified AI APIs (or simulated)
+  }  // 1. Generate post content using specified AI APIs (or simulated)
   async generatePost(
     prompt: string,
     platform: string,
     tone: string,
-    textProvider: string = 'gemini',
-    imageProvider: string = 'simulation',
+    textProvider?: string,
+    imageProvider?: string,
     videoProvider: string = 'simulation',
     includeImage: boolean = false,
     includeVideo: boolean = false,
     postType: string = 'POST',
+    textModel?: string,
+    imageModel?: string,
   ) {
+    const aiSettings = await this.getAiSettings();
+    
+    // Resolve providers and models with fallbacks to defaults
+    let activeTextProvider = textProvider || aiSettings.defaultTextProvider || 'gemini';
+    let activeTextModel = textModel || aiSettings.defaultTextModel || 'gemini-2.5-flash';
+    let activeImageProvider = imageProvider || aiSettings.defaultImageProvider || 'huggingface';
+    let activeImageModel = imageModel || aiSettings.defaultImageModel || 'flux';
+
+    // Find custom configs if any
+    let customTextConfig: any = null;
+    let customImageConfig: any = null;
+    if (aiSettings.customModels && Array.isArray(aiSettings.customModels)) {
+      const modelsList = aiSettings.customModels as any[];
+      customTextConfig = modelsList.find(
+        (m: any) => String(m.id) === String(activeTextProvider) || m.name === activeTextProvider
+      );
+      customImageConfig = modelsList.find(
+        (m: any) => String(m.id) === String(activeImageProvider) || m.name === activeImageProvider
+      );
+    }
+
     const logs: string[] = [];
     let caption = '';
     let imagePrompt = '';
     let videoPrompt = '';
     let imageUrl = '';
     let videoUrl = '';
-    let textProviderUsed = textProvider;
-    let imageProviderUsed = imageProvider;
+    let textProviderUsed = customTextConfig ? customTextConfig.name : activeTextProvider;
+    let imageProviderUsed = customImageConfig ? customImageConfig.name : activeImageProvider;
     let videoProviderUsed = videoProvider;
 
     const isStory = postType === 'STORY';
@@ -69,21 +154,65 @@ Video promptu (videoPrompt) için kurallar:
 }`;
 
     // --- 1. Text Generation ---
-    if (textProvider === 'openai') {
-      const openAiKey = process.env.OPENAI_API_KEY;
+    if (customTextConfig) {
+      const customKey = customTextConfig.apiKey;
+      const customUrl = customTextConfig.apiUrl.replace(/\/$/, '');
+      const modelName = customTextConfig.selectedModel || activeTextModel;
+
+      try {
+        logs.push(`Özel API (${customTextConfig.name}) ile metin üretiliyor... model: ${modelName}`);
+        const response = await fetch(`${customUrl}/v1/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${customKey}`,
+          },
+          body: JSON.stringify({
+            model: modelName,
+            response_format: { type: 'json_object' },
+            messages: [
+              { role: 'system', content: systemInstruction },
+              { role: 'user', content: `Konu/Prompt: "${prompt}"\nPlatform: ${platform}\nSes Tonu: ${tone}\n\nİçeriği oluştur:` }
+            ],
+            temperature: 0.7,
+          }),
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Özel model API hatası: ${response.statusText} - ${errText}`);
+        }
+
+        const resData = await response.json();
+        const textResponse = resData.choices?.[0]?.message?.content;
+        if (textResponse) {
+          const parsed = JSON.parse(textResponse);
+          caption = parsed.caption || '';
+          imagePrompt = parsed.imagePrompt || '';
+          videoPrompt = parsed.videoPrompt || '';
+          logs.push(`Metin özel model (${customTextConfig.name} - ${modelName}) ile başarıyla üretildi.`);
+        }
+      } catch (error) {
+        this.checkAiTokenError(error, `Özel Model (${customTextConfig.name})`);
+        logs.push(`Özel model metin üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
+        textProviderUsed = 'simulation';
+      }
+    } else if (activeTextProvider === 'openai') {
+      const openAiKey = aiSettings.openAiKey || process.env.OPENAI_API_KEY;
+      const openAiUrl = (aiSettings.openAiUrl || 'https://api.openai.com').replace(/\/$/, '');
       if (!openAiKey) {
         logs.push('OPENAI_API_KEY bulunamadı. Metin üretimi için simülasyon moduna geçiliyor.');
         textProviderUsed = 'simulation';
       } else {
         try {
-          const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          const response = await fetch(`${openAiUrl}/v1/chat/completions`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${openAiKey}`,
             },
             body: JSON.stringify({
-              model: 'gpt-4o-mini',
+              model: activeTextModel || 'gpt-4o-mini',
               response_format: { type: 'json_object' },
               messages: [
                 { role: 'system', content: systemInstruction },
@@ -105,7 +234,7 @@ Video promptu (videoPrompt) için kurallar:
             caption = parsed.caption || '';
             imagePrompt = parsed.imagePrompt || '';
             videoPrompt = parsed.videoPrompt || '';
-            logs.push('Metin OpenAI GPT ile başarıyla üretildi.');
+            logs.push(`Metin OpenAI (${activeTextModel}) ile başarıyla üretildi.`);
           }
         } catch (error) {
           this.checkAiTokenError(error, 'OpenAI (Metin)');
@@ -113,14 +242,15 @@ Video promptu (videoPrompt) için kurallar:
           textProviderUsed = 'simulation';
         }
       }
-    } else if (textProvider === 'claude') {
-      const claudeKey = process.env.CLAUDE_API_KEY;
+    } else if (activeTextProvider === 'claude') {
+      const claudeKey = aiSettings.claudeKey || process.env.CLAUDE_API_KEY;
+      const claudeUrl = (aiSettings.claudeUrl || 'https://api.anthropic.com').replace(/\/$/, '');
       if (!claudeKey) {
         logs.push('CLAUDE_API_KEY bulunamadı. Metin üretimi için simülasyon moduna geçiliyor.');
         textProviderUsed = 'simulation';
       } else {
         try {
-          const response = await fetch('https://api.anthropic.com/v1/messages', {
+          const response = await fetch(`${claudeUrl}/v1/messages`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -128,7 +258,7 @@ Video promptu (videoPrompt) için kurallar:
               'anthropic-version': '2023-06-01'
             },
             body: JSON.stringify({
-              model: 'claude-3-5-sonnet-20241022',
+              model: activeTextModel || 'claude-3-5-sonnet-20241022',
               max_tokens: 1000,
               system: systemInstruction,
               messages: [
@@ -149,7 +279,7 @@ Video promptu (videoPrompt) için kurallar:
             caption = parsed.caption || '';
             imagePrompt = parsed.imagePrompt || '';
             videoPrompt = parsed.videoPrompt || '';
-            logs.push('Metin Anthropic Claude ile başarıyla üretildi.');
+            logs.push(`Metin Anthropic Claude (${activeTextModel}) ile başarıyla üretildi.`);
           }
         } catch (error) {
           this.checkAiTokenError(error, 'Anthropic Claude (Metin)');
@@ -157,15 +287,16 @@ Video promptu (videoPrompt) için kurallar:
           textProviderUsed = 'simulation';
         }
       }
-    } else if (textProvider === 'gemini') {
-      const geminiKey = process.env.GEMINI_API_KEY;
+    } else if (activeTextProvider === 'gemini') {
+      const geminiKey = aiSettings.geminiKey || process.env.GEMINI_API_KEY;
+      const geminiUrl = (aiSettings.geminiUrl || 'https://generativelanguage.googleapis.com').replace(/\/$/, '');
       if (!geminiKey) {
         logs.push('GEMINI_API_KEY bulunamadı. Metin üretimi için simülasyon moduna geçiliyor.');
         textProviderUsed = 'simulation';
       } else {
         try {
           const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+            `${geminiUrl}/v1beta/models/${activeTextModel || 'gemini-2.5-flash'}:generateContent?key=${geminiKey}`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -191,7 +322,7 @@ Video promptu (videoPrompt) için kurallar:
             caption = parsed.caption || '';
             imagePrompt = parsed.imagePrompt || '';
             videoPrompt = parsed.videoPrompt || '';
-            logs.push('Metin Google Gemini ile başarıyla üretildi.');
+            logs.push(`Metin Google Gemini (${activeTextModel}) ile başarıyla üretildi.`);
           }
         } catch (error) {
           this.checkAiTokenError(error, 'Google Gemini (Metin)');
@@ -212,21 +343,59 @@ Video promptu (videoPrompt) için kurallar:
 
     // --- 2. Image Generation ---
     if (includeImage) {
-      if (imageProvider === 'dalle') {
-        const openAiKey = process.env.OPENAI_API_KEY;
+      if (customImageConfig) {
+        const customKey = customImageConfig.apiKey;
+        const customUrl = customImageConfig.apiUrl.replace(/\/$/, '');
+        const modelName = customImageConfig.selectedModel || activeImageModel;
+
+        try {
+          logs.push(`Özel API (${customImageConfig.name}) ile görsel üretiliyor... model: ${modelName}`);
+          const response = await fetch(`${customUrl}/v1/images/generations`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${customKey}`
+            },
+            body: JSON.stringify({
+              model: modelName,
+              prompt: imagePrompt,
+              n: 1,
+              size: '1024x1024'
+            })
+          });
+
+          if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Özel model görsel API hatası: ${response.statusText} - ${errText}`);
+          }
+
+          const data = await response.json();
+          imageUrl = data.data?.[0]?.url || data.data?.[0]?.b64_json || '';
+          if (imageUrl && !imageUrl.startsWith('data:') && !imageUrl.startsWith('http')) {
+            imageUrl = `data:image/png;base64,${imageUrl}`;
+          }
+          logs.push(`Görsel özel model (${customImageConfig.name} - ${modelName}) ile başarıyla üretildi.`);
+        } catch (error) {
+          this.checkAiTokenError(error, `Özel Görsel Modeli (${customImageConfig.name})`);
+          logs.push(`Özel model görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
+          imageProviderUsed = 'simulation';
+        }
+      } else if (activeImageProvider === 'dalle') {
+        const openAiKey = aiSettings.openAiKey || process.env.OPENAI_API_KEY;
+        const openAiUrl = (aiSettings.openAiUrl || 'https://api.openai.com').replace(/\/$/, '');
         if (!openAiKey) {
           logs.push('OPENAI_API_KEY bulunamadı. DALL-E görsel üretimi için simülasyon moduna geçiliyor.');
           imageProviderUsed = 'simulation';
         } else {
           try {
-            const response = await fetch('https://api.openai.com/v1/images/generations', {
+            const response = await fetch(`${openAiUrl}/v1/images/generations`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${openAiKey}`
               },
               body: JSON.stringify({
-                model: 'dall-e-3',
+                model: activeImageModel || 'dall-e-3',
                 prompt: imagePrompt,
                 n: 1,
                 size: '1024x1024'
@@ -240,15 +409,15 @@ Video promptu (videoPrompt) için kurallar:
 
             const data = await response.json();
             imageUrl = data.data?.[0]?.url || '';
-            logs.push('Görsel OpenAI DALL-E 3 ile başarıyla üretildi.');
+            logs.push(`Görsel OpenAI DALL-E (${activeImageModel || 'dall-e-3'}) ile başarıyla üretildi.`);
           } catch (error) {
             this.checkAiTokenError(error, 'OpenAI DALL-E 3 (Görsel)');
             logs.push(`DALL-E görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
             imageProviderUsed = 'simulation';
           }
         }
-      } else if (imageProvider === 'stability') {
-        const stabilityKey = process.env.STABILITY_API_KEY;
+      } else if (activeImageProvider === 'stability') {
+        const stabilityKey = aiSettings.stabilityKey || process.env.STABILITY_API_KEY;
         if (!stabilityKey) {
           logs.push('STABILITY_API_KEY bulunamadı. Stability AI görsel üretimi için simülasyon moduna geçiliyor.');
           imageProviderUsed = 'simulation';
@@ -291,15 +460,16 @@ Video promptu (videoPrompt) için kurallar:
             imageProviderUsed = 'simulation';
           }
         }
-      } else if (imageProvider === 'huggingface') {
-        const hfKey = process.env.HUGGINGFACE_API_KEY;
+      } else if (activeImageProvider === 'huggingface') {
+        const hfKey = aiSettings.huggingFaceKey || process.env.HUGGINGFACE_API_KEY;
         if (!hfKey) {
           logs.push('HUGGINGFACE_API_KEY bulunamadı. Hugging Face görsel üretimi için simülasyon moduna geçiliyor.');
           imageProviderUsed = 'simulation';
         } else {
           try {
+            const modelPath = activeImageModel || 'black-forest-labs/FLUX.1-schnell';
             const response = await fetch(
-              'https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell',
+              `https://router.huggingface.co/hf-inference/models/${modelPath}`,
               {
                 method: 'POST',
                 headers: {
@@ -357,7 +527,7 @@ Video promptu (videoPrompt) için kurallar:
           videoProviderUsed = 'simulation';
         }
       } else if (videoProvider === 'sora') {
-        const openAiKey = process.env.OPENAI_API_KEY;
+        const openAiKey = aiSettings.openAiKey || process.env.OPENAI_API_KEY;
         if (!openAiKey) {
           logs.push('OPENAI_API_KEY bulunamadı. Sora video üretimi için simülasyon moduna geçiliyor.');
           videoProviderUsed = 'simulation';
@@ -580,14 +750,28 @@ Video promptu (videoPrompt) için kurallar:
     imagePrompt: string,
     feedback?: string,
     imageProvider: string = 'huggingface',
+    imageModel?: string,
   ) {
+    const aiSettings = await this.getAiSettings();
+    let activeImageProvider = imageProvider;
+    let activeImageModel = imageModel || aiSettings.defaultImageModel || 'flux';
+
+    // Find custom configs if any
+    let customImageConfig: any = null;
+    if (aiSettings.customModels && Array.isArray(aiSettings.customModels)) {
+      customImageConfig = (aiSettings.customModels as any[]).find(
+        (m: any) => String(m.id) === String(activeImageProvider) || m.name === activeImageProvider
+      );
+    }
+
     const logs: string[] = [];
     let finalPrompt = imagePrompt;
-    let imageProviderUsed = imageProvider;
+    let imageProviderUsed = customImageConfig ? customImageConfig.name : activeImageProvider;
     let imageUrl = '';
 
     if (feedback && feedback.trim()) {
-      const geminiKey = process.env.GEMINI_API_KEY;
+      const geminiKey = aiSettings.geminiKey || process.env.GEMINI_API_KEY;
+      const geminiUrl = (aiSettings.geminiUrl || 'https://generativelanguage.googleapis.com').replace(/\/$/, '');
       if (geminiKey) {
         try {
           logs.push(`Görsel promptu kullanıcının geribildirimiyle ("${feedback}") güncelleniyor...`);
@@ -599,7 +783,7 @@ The updated prompt must follow these strict rules:
 Output ONLY the final updated English prompt. Do not write any introduction, code blocks, or explanation.`;
 
           const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
+            `${geminiUrl}/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -631,21 +815,59 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
       }
     }
 
-    if (imageProvider === 'dalle') {
-      const openAiKey = process.env.OPENAI_API_KEY;
+    if (customImageConfig) {
+      const customKey = customImageConfig.apiKey;
+      const customUrl = customImageConfig.apiUrl.replace(/\/$/, '');
+      const modelName = customImageConfig.selectedModel || activeImageModel;
+
+      try {
+        logs.push(`Özel API (${customImageConfig.name}) ile görsel yeniden üretiliyor... model: ${modelName}`);
+        const response = await fetch(`${customUrl}/v1/images/generations`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${customKey}`
+          },
+          body: JSON.stringify({
+            model: modelName,
+            prompt: finalPrompt,
+            n: 1,
+            size: '1024x1024'
+          })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          imageUrl = data.data?.[0]?.url || data.data?.[0]?.b64_json || '';
+          if (imageUrl && !imageUrl.startsWith('data:') && !imageUrl.startsWith('http')) {
+            imageUrl = `data:image/png;base64,${imageUrl}`;
+          }
+          logs.push(`Görsel özel model (${customImageConfig.name} - ${modelName}) ile başarıyla yeniden üretildi.`);
+        } else {
+          const errText = await response.text();
+          throw new Error(`Özel model API hatası: ${response.statusText} - ${errText}`);
+        }
+      } catch (error) {
+        this.checkAiTokenError(error, `Özel Görsel Modeli (${customImageConfig.name})`);
+        logs.push(`Özel model görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
+        imageProviderUsed = 'simulation';
+      }
+    } else if (activeImageProvider === 'dalle') {
+      const openAiKey = aiSettings.openAiKey || process.env.OPENAI_API_KEY;
+      const openAiUrl = (aiSettings.openAiUrl || 'https://api.openai.com').replace(/\/$/, '');
       if (!openAiKey) {
         logs.push('OPENAI_API_KEY bulunamadı. DALL-E görsel üretimi için simülasyon moduna geçiliyor.');
         imageProviderUsed = 'simulation';
       } else {
         try {
-          const response = await fetch('https://api.openai.com/v1/images/generations', {
+          const response = await fetch(`${openAiUrl}/v1/images/generations`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${openAiKey}`
             },
             body: JSON.stringify({
-              model: 'dall-e-3',
+              model: activeImageModel || 'dall-e-3',
               prompt: finalPrompt,
               n: 1,
               size: '1024x1024'
@@ -655,7 +877,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
           if (response.ok) {
             const data = await response.json();
             imageUrl = data.data?.[0]?.url || '';
-            logs.push('Görsel OpenAI DALL-E 3 ile başarıyla yeniden üretildi.');
+            logs.push(`Görsel OpenAI DALL-E (${activeImageModel || 'dall-e-3'}) ile başarıyla yeniden üretildi.`);
           } else {
             const errText = await response.text();
             throw new Error(`DALL-E hatası: ${response.statusText} - ${errText}`);
@@ -666,8 +888,8 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
           imageProviderUsed = 'simulation';
         }
       }
-    } else if (imageProvider === 'stability') {
-      const stabilityKey = process.env.STABILITY_API_KEY;
+    } else if (activeImageProvider === 'stability') {
+      const stabilityKey = aiSettings.stabilityKey || process.env.STABILITY_API_KEY;
       if (!stabilityKey) {
         logs.push('STABILITY_API_KEY bulunamadı. Stability AI görsel üretimi için simülasyon moduna geçiliyor.');
         imageProviderUsed = 'simulation';
@@ -710,15 +932,16 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
           imageProviderUsed = 'simulation';
         }
       }
-    } else if (imageProvider === 'huggingface') {
-      const hfKey = process.env.HUGGINGFACE_API_KEY;
+    } else if (activeImageProvider === 'huggingface') {
+      const hfKey = aiSettings.huggingFaceKey || process.env.HUGGINGFACE_API_KEY;
       if (!hfKey) {
         logs.push('HUGGINGFACE_API_KEY bulunamadı. Hugging Face görsel üretimi için simülasyon moduna geçiliyor.');
         imageProviderUsed = 'simulation';
       } else {
         try {
+          const modelPath = activeImageModel || 'black-forest-labs/FLUX.1-schnell';
           const response = await fetch(
-            'https://router.huggingface.co/hf-inference/models/black-forest-labs/FLUX.1-schnell',
+            `https://router.huggingface.co/hf-inference/models/${modelPath}`,
             {
               method: 'POST',
               headers: {
@@ -733,7 +956,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
             const buffer = await response.arrayBuffer();
             const base64 = Buffer.from(buffer).toString('base64');
             imageUrl = `data:image/jpeg;base64,${base64}`;
-            logs.push('Görsel Hugging Face (FLUX.1-schnell) ile başarıyla yeniden üretildi.');
+            logs.push(`Görsel Hugging Face (${modelPath}) ile başarıyla yeniden üretildi.`);
           } else {
             const errText = await response.text();
             throw new Error(`Hugging Face hatası: ${response.statusText} - ${errText}`);
@@ -838,6 +1061,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         status: data.status || 'DRAFT',
         scheduledAt: data.scheduledAt ? new Date(data.scheduledAt) : null,
         publishedAt: data.publishedAt ? new Date(data.publishedAt) : null,
+        accountId: data.accountId ? parseInt(data.accountId, 10) : null,
       },
     });
   }
@@ -854,6 +1078,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         scheduledAt: data.scheduledAt ? new Date(data.scheduledAt) : null,
         publishedAt: data.publishedAt ? new Date(data.publishedAt) : null,
         errorMessage: data.errorMessage,
+        accountId: data.accountId ? parseInt(data.accountId, 10) : null,
       },
     });
   }
@@ -916,9 +1141,16 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
       await this.updatePostProgress(id, 'Paylaşım başlatıldı, hesap bilgileri sorgulanıyor...');
 
       // Find account for this platform
-      const account = await this.prisma.socialMediaAccount.findFirst({
-        where: { platform: post.platform, isActive: true },
-      });
+      let account = null;
+      if (post.accountId) {
+        account = await this.prisma.socialMediaAccount.findFirst({
+          where: { id: post.accountId, isActive: true },
+        });
+      } else {
+        account = await this.prisma.socialMediaAccount.findFirst({
+          where: { platform: post.platform, isActive: true },
+        });
+      }
 
       if (!account) {
         throw new Error(`${post.platform} için aktif bir sosyal medya hesabı bulunamadı.`);
@@ -1246,11 +1478,14 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         ? `⚠️ <b>HESAP ACCESS TOKEN SÜRESİ DOLDU VEYA YETKİ HATASI</b>`
         : `❌ <b>GÖNDERİ PAYLAŞILAMADI (HATA)</b>`;
 
+      const postPreview = post.caption ? (post.caption.length > 80 ? post.caption.substring(0, 80) + '...' : post.caption) : '(Metinsiz Gönderi)';
+
       const notificationMsg = `${errMsgHeader}\n\n` +
+        `<b>Gönderi ID:</b> #${id}\n` +
         `<b>Platform:</b> ${post.platform}\n` +
-        `<b>Post ID:</b> #${id}\n` +
-        `<b>Hata Detayı:</b> <code>${error.message}</code>\n\n` +
-        `💡 Lütfen Hesap Tanımları sekmesinden bağlantıyı doğrulayın veya yenileyin.`;
+        `<b>Gönderi İçeriği:</b> <i>"${postPreview}"</i>\n` +
+        `<b>Hata Konusu/Nedeni:</b> <code>${error.message}</code>\n\n` +
+        `💡 Lütfen Hesap Tanımları sekmesini kontrol edin veya yerel sunucu/ngrok bağlantınızı doğrulayın.`;
       
       await this.sendTelegramNotification(notificationMsg);
 
@@ -1484,6 +1719,11 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
   }
 
   async createCampaign(data: any) {
+    let imageUrl = data.imageUrl;
+    if (imageUrl && imageUrl.startsWith('data:')) {
+      imageUrl = this.saveBase64Media(imageUrl, 'campaign-image');
+    }
+
     return this.prisma.socialMediaCampaign.create({
       data: {
         title: data.title,
@@ -1493,11 +1733,17 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         frequency: data.frequency || 'DAILY',
         timeOfDay: data.timeOfDay || '09:00',
         isActive: data.isActive !== undefined ? data.isActive : true,
+        imageUrl: imageUrl || null,
       },
     });
   }
 
   async updateCampaign(id: number, data: any) {
+    let imageUrl = data.imageUrl;
+    if (imageUrl && imageUrl.startsWith('data:')) {
+      imageUrl = this.saveBase64Media(imageUrl, 'campaign-image');
+    }
+
     return this.prisma.socialMediaCampaign.update({
       where: { id },
       data: {
@@ -1508,6 +1754,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         frequency: data.frequency,
         timeOfDay: data.timeOfDay,
         isActive: data.isActive,
+        imageUrl: imageUrl !== undefined ? imageUrl : undefined,
       },
     });
   }
@@ -1537,9 +1784,17 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
   @Cron(CronExpression.EVERY_MINUTE)
   async handleCampaigns() {
     const now = new Date();
-    // Turkey/Local time HH:MM format
-    const hours = String(now.getHours()).padStart(2, '0');
-    const minutes = String(now.getMinutes()).padStart(2, '0');
+    
+    // Turkey/Local time (Europe/Istanbul) HH:MM format
+    const timeParts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Europe/Istanbul',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(now);
+
+    const hours = timeParts.find(p => p.type === 'hour')?.value || '00';
+    const minutes = timeParts.find(p => p.type === 'minute')?.value || '00';
     const timeStr = `${hours}:${minutes}`;
 
     const activeCampaigns = await this.prisma.socialMediaCampaign.findMany({
@@ -1555,6 +1810,19 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
 
     this.logger.log(`${activeCampaigns.length} adet aktif kampanya kontrol ediliyor. Saat: ${timeStr}`);
 
+    const getTurkeyDateStr = (date: Date) => {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Europe/Istanbul',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(date);
+      const y = parts.find(p => p.type === 'year')?.value;
+      const m = parts.find(p => p.type === 'month')?.value;
+      const d = parts.find(p => p.type === 'day')?.value;
+      return `${y}-${m}-${d}`;
+    };
+
     for (const campaign of activeCampaigns) {
       try {
         let shouldRun = false;
@@ -1566,9 +1834,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
           const diffDays = diffMs / (1000 * 60 * 60 * 24);
 
           if (campaign.frequency === 'DAILY') {
-            const isSameDay = lastRun.getDate() === now.getDate() &&
-                              lastRun.getMonth() === now.getMonth() &&
-                              lastRun.getFullYear() === now.getFullYear();
+            const isSameDay = getTurkeyDateStr(lastRun) === getTurkeyDateStr(now);
             if (!isSameDay) {
               shouldRun = true;
             }
@@ -1591,9 +1857,12 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
           data: { lastRunAt: now },
         });
 
-        // Set up providers
-        const textProvider = process.env.GEMINI_API_KEY ? 'gemini' : 'simulation';
-        const imageProvider = process.env.HUGGINGFACE_API_KEY ? 'huggingface' : 'simulation';
+        // Load default providers and models from global settings
+        const aiSettings = await this.getAiSettings();
+        const textProvider = aiSettings.defaultTextProvider || 'gemini';
+        const textModel = aiSettings.defaultTextModel || 'gemini-2.5-flash';
+        const imageProvider = aiSettings.defaultImageProvider || 'huggingface';
+        const imageModel = aiSettings.defaultImageModel || 'flux';
 
         // Generate content
         this.logger.log(`Kampanya postu üretiliyor... Prompt: "${campaign.prompt}"`);
@@ -1604,38 +1873,61 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
           textProvider,
           imageProvider,
           'simulation',
-          true, // Include image
+          campaign.imageUrl ? false : true, // Do not generate AI image if static image is set
           false, // Include video
-          campaign.postType
+          campaign.postType,
+          textModel,
+          imageModel
         );
 
-        // Create the post database record
+        // Create the post database record with status PENDING_APPROVAL
         const newPost = await this.prisma.socialMediaPost.create({
           data: {
             platform: campaign.platform,
             prompt: campaign.prompt,
             caption: genResult.caption,
-            imageUrl: genResult.imageUrl || null,
+            imageUrl: campaign.imageUrl || genResult.imageUrl || null,
             videoUrl: null,
             postType: campaign.postType,
-            status: 'DRAFT',
+            status: 'PENDING_APPROVAL',
+            campaignId: campaign.id,
           },
         });
 
-        this.logger.log(`Kampanya postu yayınlanıyor... Post ID: ${newPost.id}`);
-        // Publish it immediately
-        await this.publishPost(newPost.id);
+        this.logger.log(`Kampanya postu onay bekliyor... Post ID: ${newPost.id}`);
 
-        const campaignMsg = `🤖 <b>ZAMANLANMIŞ GÖREV TETİKLENDİ</b>\n\n` +
+        let mediaLink = '';
+        if (newPost.imageUrl) {
+          mediaLink = `\n🖼️ <b>Görsel:</b> <a href="${this.getAbsoluteUrl(newPost.imageUrl)}">Görüntüle</a>\n`;
+        }
+
+        const campaignMsg = `🔔 <b>ZAMANLANMIŞ GÖREV (ONAY BEKLİYOR)</b>\n\n` +
           `<b>Kampanya:</b> ${campaign.title}\n` +
           `<b>Platform:</b> ${campaign.platform}\n` +
           `<b>Tür:</b> ${campaign.postType}\n` +
           `<b>Konu/Talimat:</b> <i>"${campaign.prompt}"</i>\n\n` +
-          `🚀 Kampanya gönderisi otomatik olarak hazırlandı ve paylaşıldı.`;
-        await this.sendTelegramNotification(campaignMsg);
+          `<b>Metin:</b>\n<i>${newPost.caption}</i>\n` +
+          mediaLink;
+
+        // Interactive inline buttons for Telegram
+        const replyMarkup = {
+          inline_keyboard: [
+            [
+              { text: '✅ Onayla ve Paylaş', callback_data: `approve_post_${newPost.id}` },
+              { text: '❌ Reddet', callback_data: `reject_post_${newPost.id}` }
+            ]
+          ]
+        };
+
+        await this.sendTelegramNotification(campaignMsg, replyMarkup);
 
       } catch (error) {
         this.logger.error(`Kampanya (#${campaign.id}) yürütülürken hata:`, error);
+        const errMsg = `❌ <b>KAMPANYA YÜRÜTÜLÜRKEN HATA OLUŞTU</b>\n\n` +
+          `<b>Kampanya:</b> ${campaign.title} (#${campaign.id})\n` +
+          `<b>Platform:</b> ${campaign.platform}\n` +
+          `<b>Hata Nedeni:</b> <code>${error.message}</code>`;
+        await this.sendTelegramNotification(errMsg);
       }
     }
   }
@@ -1679,7 +1971,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
     }
   }
 
-  async sendTelegramNotification(message: string) {
+  async sendTelegramNotification(message: string, replyMarkup?: any) {
     try {
       const setting = await this.prisma.telegramSetting.findFirst();
       if (!setting || !setting.isActive || !setting.botToken || !setting.chatId) {
@@ -1694,6 +1986,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
           chat_id: setting.chatId,
           text: message,
           parse_mode: 'HTML',
+          ...(replyMarkup && { reply_markup: replyMarkup }),
         }),
       });
 
@@ -1703,6 +1996,137 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
       }
     } catch (err) {
       this.logger.error('Telegram bildirim fonksiyonunda beklenmeyen hata:', err);
+    }
+  }
+
+  @Cron('*/5 * * * * *')
+  async handleTelegramPolling() {
+    if (this.isPollingTelegram) return;
+    this.isPollingTelegram = true;
+
+    try {
+      const setting = await this.prisma.telegramSetting.findFirst();
+      if (!setting || !setting.isActive || !setting.botToken) {
+        this.isPollingTelegram = false;
+        return;
+      }
+
+      const url = `https://api.telegram.org/bot${setting.botToken}/getUpdates?offset=${this.telegramOffset}&timeout=3`;
+      const response = await fetch(url);
+      if (!response.ok) {
+        this.isPollingTelegram = false;
+        return;
+      }
+
+      const data = await response.json();
+      if (data.ok && data.result.length > 0) {
+        for (const update of data.result) {
+          this.telegramOffset = update.update_id + 1;
+
+          if (update.callback_query) {
+            const query = update.callback_query;
+            const callbackData = query.data;
+            const callbackQueryId = query.id;
+            const chatId = query.message.chat.id;
+            const messageId = query.message.message_id;
+
+            if (callbackData.startsWith('approve_post_')) {
+              const postId = parseInt(callbackData.replace('approve_post_', ''), 10);
+              
+              await fetch(`https://api.telegram.org/bot${setting.botToken}/answerCallbackQuery`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  callback_query_id: callbackQueryId,
+                  text: 'Gönderi onaylandı, paylaşılıyor...',
+                }),
+              });
+
+              try {
+                const post = await this.prisma.socialMediaPost.findUnique({ where: { id: postId } });
+                if (!post) {
+                  throw new Error('Gönderi bulunamadı.');
+                }
+                if (post.status === 'PUBLISHED' || post.status === 'PUBLISHING') {
+                  await fetch(`https://api.telegram.org/bot${setting.botToken}/editMessageText`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      chat_id: chatId,
+                      message_id: messageId,
+                      text: `✅ <b>Gönderi zaten paylaşıldı veya paylaşım sırasında.</b>\n\nPlatform: ${post.platform}\nMetin: ${post.caption}`,
+                      parse_mode: 'HTML',
+                    }),
+                  });
+                  continue;
+                }
+
+                await fetch(`https://api.telegram.org/bot${setting.botToken}/editMessageText`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    chat_id: chatId,
+                    message_id: messageId,
+                    text: `⌛ <b>Gönderi onaylandı ve paylaşım başlatıldı...</b>\n\n<b>Platform:</b> ${post.platform}\n<b>Tür:</b> ${post.postType}\n<b>Metin:</b>\n<i>${post.caption}</i>`,
+                    parse_mode: 'HTML',
+                  }),
+                });
+
+                await this.publishPost(postId);
+              } catch (err) {
+                this.logger.error(`Telegram onayıyla paylaşım başarısız (Post #${postId}):`, err);
+                await fetch(`https://api.telegram.org/bot${setting.botToken}/sendMessage`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    chat_id: chatId,
+                    text: `❌ <b>Hata:</b> Post #${postId} paylaşılamadı. Detay: ${err.message}`,
+                    parse_mode: 'HTML',
+                  }),
+                });
+              }
+            } else if (callbackData.startsWith('reject_post_')) {
+              const postId = parseInt(callbackData.replace('reject_post_', ''), 10);
+              
+              await fetch(`https://api.telegram.org/bot${setting.botToken}/answerCallbackQuery`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  callback_query_id: callbackQueryId,
+                  text: 'Gönderi reddedildi.',
+                }),
+              });
+
+              try {
+                const post = await this.prisma.socialMediaPost.findUnique({ where: { id: postId } });
+                if (post) {
+                  await this.prisma.socialMediaPost.update({
+                    where: { id: postId },
+                    data: { status: 'REJECTED' },
+                  });
+                  
+                  await fetch(`https://api.telegram.org/bot${setting.botToken}/editMessageText`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      chat_id: chatId,
+                      message_id: messageId,
+                      text: `❌ <b>Gönderi Reddedildi (Paylaşım İptal Edildi).</b>\n\n<b>Platform:</b> ${post.platform}\n<b>Metin:</b>\n<i>${post.caption}</i>`,
+                      parse_mode: 'HTML',
+                    }),
+                  });
+                }
+              } catch (err) {
+                this.logger.error(`Post reddetme hatası:`, err);
+              }
+            }
+          }
+        }
+      }
+    } catch (err) {
+      this.logger.error('Telegram polling error:', err);
+    } finally {
+      this.isPollingTelegram = false;
     }
   }
 
@@ -1775,4 +2199,102 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
       });
     }
   }
+
+  async getAiSettings() {
+    let settings = await this.prisma.aiModelSetting.findUnique({
+      where: { id: 'GLOBAL' },
+    });
+    if (!settings) {
+      settings = await this.prisma.aiModelSetting.create({
+        data: { id: 'GLOBAL' },
+      });
+    }
+    return settings;
+  }
+
+  async saveAiSettings(data: any) {
+    return this.prisma.aiModelSetting.upsert({
+      where: { id: 'GLOBAL' },
+      update: {
+        geminiKey: data.geminiKey,
+        geminiUrl: data.geminiUrl,
+        openAiKey: data.openAiKey,
+        openAiUrl: data.openAiUrl,
+        claudeKey: data.claudeKey,
+        claudeUrl: data.claudeUrl,
+        stabilityKey: data.stabilityKey,
+        huggingFaceKey: data.huggingFaceKey,
+        defaultTextProvider: data.defaultTextProvider,
+        defaultTextModel: data.defaultTextModel,
+        defaultImageProvider: data.defaultImageProvider,
+        defaultImageModel: data.defaultImageModel,
+        customModels: data.customModels || [],
+      },
+      create: {
+        id: 'GLOBAL',
+        geminiKey: data.geminiKey,
+        geminiUrl: data.geminiUrl,
+        openAiKey: data.openAiKey,
+        openAiUrl: data.openAiUrl,
+        claudeKey: data.claudeKey,
+        claudeUrl: data.claudeUrl,
+        stabilityKey: data.stabilityKey,
+        huggingFaceKey: data.huggingFaceKey,
+        defaultTextProvider: data.defaultTextProvider || 'gemini',
+        defaultTextModel: data.defaultTextModel || 'gemini-2.5-flash',
+        defaultImageProvider: data.defaultImageProvider || 'huggingface',
+        defaultImageModel: data.defaultImageModel || 'flux',
+        customModels: data.customModels || [],
+      },
+    });
+  }
+
+  async fetchModels(apiUrl: string, apiKey: string, provider: string) {
+    try {
+      if (!apiUrl || !apiKey) {
+        throw new Error('API adresi ve anahtarı gereklidir.');
+      }
+      
+      const cleanUrl = apiUrl.replace(/\/$/, '');
+      
+      if (provider === 'gemini') {
+        const response = await fetch(`${cleanUrl}/v1beta/models?key=${apiKey}`);
+        if (!response.ok) {
+          throw new Error(`Google Gemini API hatası: ${response.statusText}`);
+        }
+        const data = await response.json();
+        if (data && Array.isArray(data.models)) {
+          return data.models.map((m: any) => m.name.replace('models/', ''));
+        }
+        return [];
+      } else {
+        const headers: any = {};
+        if (provider === 'claude') {
+          headers['x-api-key'] = apiKey;
+          headers['anthropic-version'] = '2023-06-01';
+        } else {
+          headers['Authorization'] = `Bearer ${apiKey}`;
+        }
+        
+        const response = await fetch(`${cleanUrl}/v1/models`, {
+          headers,
+        });
+        
+        if (!response.ok) {
+          throw new Error(`API bağlantı hatası: ${response.statusText} (${response.status})`);
+        }
+        
+        const data = await response.json();
+        if (data && Array.isArray(data.data)) {
+          return data.data.map((m: any) => m.id);
+        } else if (data && Array.isArray(data)) {
+          return data.map((m: any) => m.id || m.name || m);
+        }
+        return [];
+      }
+    } catch (error) {
+      throw new Error(`Modeller alınamadı: ${error.message}`);
+    }
+  }
 }
+

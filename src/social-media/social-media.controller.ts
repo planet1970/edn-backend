@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, ParseIntPipe, HttpCode, HttpStatus, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { SocialMediaService } from './social-media.service';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
@@ -45,12 +46,14 @@ export class SocialMediaController {
       imagePrompt: string;
       feedback?: string;
       imageProvider?: string;
+      imageModel?: string;
     },
   ) {
     return this.socialMediaService.regenerateImage(
       body.imagePrompt,
       body.feedback,
       body.imageProvider,
+      body.imageModel,
     );
   }
 
@@ -102,6 +105,16 @@ export class SocialMediaController {
   @ApiOperation({ summary: 'Update a social media post' })
   async updatePost(@Param('id', ParseIntPipe) id: number, @Body() body: any) {
     return this.socialMediaService.updatePost(id, body);
+  }
+
+  @Post('posts/:id/media')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiOperation({ summary: 'Upload an image or video file for a post' })
+  async uploadPostMedia(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: Express.Multer.File
+  ) {
+    return this.socialMediaService.uploadPostMedia(id, file);
   }
 
   @Delete('posts/:id')
@@ -166,4 +179,26 @@ export class SocialMediaController {
   async testTelegram() {
     return this.socialMediaService.sendTelegramTestMessage();
   }
+
+  // --- AI Model Settings ---
+  @Get('ai-settings')
+  @ApiOperation({ summary: 'Get global AI model settings (API keys, endpoints)' })
+  async getAiSettings() {
+    return this.socialMediaService.getAiSettings();
+  }
+
+  @Post('ai-settings')
+  @ApiOperation({ summary: 'Save global AI model settings' })
+  async saveAiSettings(@Body() body: any) {
+    return this.socialMediaService.saveAiSettings(body);
+  }
+
+  @Post('ai-settings/fetch-models')
+  @ApiOperation({ summary: 'Fetch available models from an API URL using API Key' })
+  async fetchModels(
+    @Body() body: { apiUrl: string; apiKey: string; provider: string }
+  ) {
+    return this.socialMediaService.fetchModels(body.apiUrl, body.apiKey, body.provider);
+  }
 }
+
