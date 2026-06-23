@@ -161,6 +161,13 @@ export class SocialMediaController {
     return this.socialMediaService.toggleCampaign(id);
   }
 
+  @Post('campaigns/:id/test-trigger')
+  @ApiOperation({ summary: 'Manually trigger a campaign run to generate a test post' })
+  async testTriggerCampaign(@Param('id', ParseIntPipe) id: number) {
+    return this.socialMediaService.testTriggerCampaign(id);
+  }
+
+
   // --- Telegram Settings ---
   @Get('telegram')
   @ApiOperation({ summary: 'Get current Telegram notification settings' })

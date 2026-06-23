@@ -1780,6 +1780,81 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
     });
   }
 
+  async testTriggerCampaign(id: number) {
+    const campaign = await this.prisma.socialMediaCampaign.findUnique({
+      where: { id },
+    });
+    if (!campaign) {
+      throw new Error('Kampanya bulunamadı.');
+    }
+
+    // Load default providers and models from global settings
+    const aiSettings = await this.getAiSettings();
+    const textProvider = aiSettings.defaultTextProvider || 'gemini';
+    const textModel = aiSettings.defaultTextModel || 'gemini-2.5-flash';
+    const imageProvider = aiSettings.defaultImageProvider || 'huggingface';
+    const imageModel = aiSettings.defaultImageModel || 'flux';
+
+    // Generate content
+    const genResult = await this.generatePost(
+      campaign.prompt,
+      campaign.platform,
+      'Samimi',
+      textProvider,
+      imageProvider,
+      'simulation',
+      campaign.imageUrl ? false : true, // Do not generate AI image if static image is set
+      false, // Include video
+      campaign.postType,
+      textModel,
+      imageModel
+    );
+
+    // Create the post database record with status PENDING_APPROVAL
+    const newPost = await this.prisma.socialMediaPost.create({
+      data: {
+        platform: campaign.platform,
+        prompt: campaign.prompt,
+        caption: genResult.caption,
+        imageUrl: campaign.imageUrl || genResult.imageUrl || null,
+        videoUrl: null,
+        postType: campaign.postType,
+        status: 'PENDING_APPROVAL',
+        campaignId: campaign.id,
+      },
+    });
+
+    let mediaLink = '';
+    if (newPost.imageUrl) {
+      mediaLink = `\n🖼️ <b>Görsel:</b> <a href="${this.getAbsoluteUrl(newPost.imageUrl)}">Görüntüle</a>\n`;
+    }
+
+    const campaignMsg = `🔔 <b>ZAMANLANMIŞ GÖREV TEST ÇALIŞTIRMASI (ONAY BEKLİYOR)</b>\n\n` +
+      `<b>Kampanya:</b> ${campaign.title}\n` +
+      `<b>Platform:</b> ${campaign.platform}\n` +
+      `<b>Tür:</b> ${campaign.postType}\n` +
+      `<b>Konu/Talimat:</b> <i>"${campaign.prompt}"</i>\n\n` +
+      `<b>Metin:</b>\n<i>${newPost.caption}</i>\n` +
+      mediaLink;
+
+    try {
+      const replyMarkup = {
+        inline_keyboard: [
+          [
+            { text: '✅ Onayla ve Paylaş', callback_data: `approve_publish_${newPost.id}` },
+            { text: '❌ Reddet/Sil', callback_data: `reject_delete_${newPost.id}` },
+          ],
+        ],
+      };
+      await this.sendTelegramNotification(campaignMsg, replyMarkup);
+    } catch (tgError) {
+      this.logger.error('Telegram notification failed for campaign test trigger:', tgError);
+    }
+
+    return newPost;
+  }
+
+
   // Cron job for campaigns (runs every minute)
   @Cron(CronExpression.EVERY_MINUTE)
   async handleCampaigns() {
