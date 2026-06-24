@@ -472,7 +472,10 @@ Do not add any other stylistic rules, presets, or constraints. Return ONLY a val
           imageGenerationError = 'GEMINI_API_KEY bulunamadı.';
         } else {
           try {
-            const modelName = activeImageModel || 'imagen-3.0-generate-002';
+            let modelName = activeImageModel;
+            if (!modelName || !modelName.startsWith('imagen-')) {
+              modelName = 'imagen-3.0-generate-002';
+            }
             logs.push(`Google Gemini (${modelName}) ile görsel üretiliyor...`);
             const response = await fetch(
               `${geminiUrl}/v1beta/models/${modelName}:predict?key=${geminiKey}`,
@@ -1011,7 +1014,10 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         imageProviderUsed = 'simulation';
       } else {
         try {
-          const modelName = activeImageModel || 'imagen-3.0-generate-002';
+          let modelName = activeImageModel;
+          if (!modelName || !modelName.startsWith('imagen-')) {
+            modelName = 'imagen-3.0-generate-002';
+          }
           logs.push(`Google Gemini (${modelName}) ile görsel yeniden üretiliyor...`);
           const response = await fetch(
             `${geminiUrl}/v1beta/models/${modelName}:predict?key=${geminiKey}`,
