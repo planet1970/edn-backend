@@ -463,6 +463,49 @@ Do not add any other stylistic rules, presets, or constraints. Return ONLY a val
             imageGenerationError = `Stability AI hatası: ${error.message}`;
           }
         }
+      } else if (activeImageProvider === 'gemini') {
+        const geminiKey = aiSettings.geminiKey || process.env.GEMINI_API_KEY;
+        const geminiUrl = (aiSettings.geminiUrl || 'https://generativelanguage.googleapis.com').replace(/\/$/, '');
+        if (!geminiKey) {
+          logs.push('GEMINI_API_KEY bulunamadı. Gemini görsel üretimi için simülasyon moduna geçiliyor.');
+          imageProviderUsed = 'simulation';
+          imageGenerationError = 'GEMINI_API_KEY bulunamadı.';
+        } else {
+          try {
+            const modelName = activeImageModel || 'imagen-3.0-generate-002';
+            logs.push(`Google Gemini (${modelName}) ile görsel üretiliyor...`);
+            const response = await fetch(
+              `${geminiUrl}/v1beta/models/${modelName}:predict?key=${geminiKey}`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  instances: [{ prompt: imagePrompt }],
+                  parameters: { sampleCount: 1, aspectRatio: '1:1' }
+                })
+              }
+            );
+
+            if (!response.ok) {
+              const errText = await response.text();
+              throw new Error(`Gemini Imagen hatası: ${response.statusText} - ${errText}`);
+            }
+
+            const data = await response.json();
+            const base64 = data.predictions?.[0]?.bytesBase64Encoded;
+            if (base64) {
+              imageUrl = `data:image/png;base64,${base64}`;
+              logs.push(`Görsel Google Gemini Imagen (${modelName}) ile başarıyla üretildi.`);
+            } else {
+              throw new Error('Görsel verisi (bytesBase64Encoded) yanıttan alınamadı.');
+            }
+          } catch (error) {
+            this.checkAiTokenError(error, 'Google Gemini Imagen (Görsel)');
+            logs.push(`Gemini Imagen görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
+            imageProviderUsed = 'simulation';
+            imageGenerationError = `Gemini Imagen hatası: ${error.message}`;
+          }
+        }
       } else if (activeImageProvider === 'huggingface') {
         const hfKey = aiSettings.huggingFaceKey || process.env.HUGGINGFACE_API_KEY;
         if (!hfKey) {
@@ -957,6 +1000,47 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         } catch (error) {
           this.checkAiTokenError(error, 'Stability AI (Yeniden Görsel)');
           logs.push(`Stability AI görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
+          imageProviderUsed = 'simulation';
+        }
+      }
+    } else if (activeImageProvider === 'gemini') {
+      const geminiKey = aiSettings.geminiKey || process.env.GEMINI_API_KEY;
+      const geminiUrl = (aiSettings.geminiUrl || 'https://generativelanguage.googleapis.com').replace(/\/$/, '');
+      if (!geminiKey) {
+        logs.push('GEMINI_API_KEY bulunamadı. Gemini görsel üretimi için simülasyon moduna geçiliyor.');
+        imageProviderUsed = 'simulation';
+      } else {
+        try {
+          const modelName = activeImageModel || 'imagen-3.0-generate-002';
+          logs.push(`Google Gemini (${modelName}) ile görsel yeniden üretiliyor...`);
+          const response = await fetch(
+            `${geminiUrl}/v1beta/models/${modelName}:predict?key=${geminiKey}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                instances: [{ prompt: finalPrompt }],
+                parameters: { sampleCount: 1, aspectRatio: '1:1' }
+              })
+            }
+          );
+
+          if (response.ok) {
+            const data = await response.json();
+            const base64 = data.predictions?.[0]?.bytesBase64Encoded;
+            if (base64) {
+              imageUrl = `data:image/png;base64,${base64}`;
+              logs.push(`Görsel Google Gemini Imagen (${modelName}) ile başarıyla yeniden üretildi.`);
+            } else {
+              throw new Error('Görsel verisi (bytesBase64Encoded) yanıttan alınamadı.');
+            }
+          } else {
+            const errText = await response.text();
+            throw new Error(`Gemini Imagen hatası: ${response.statusText} - ${errText}`);
+          }
+        } catch (error) {
+          this.checkAiTokenError(error, 'Google Gemini Imagen (Yeniden Görsel)');
+          logs.push(`Gemini Imagen görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
           imageProviderUsed = 'simulation';
         }
       }
@@ -2418,9 +2502,11 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         }
         const data = await response.json();
         if (data && Array.isArray(data.models)) {
-          return data.models.map((m: any) => m.name.replace('models/', ''));
+          const list = data.models.map((m: any) => m.name.replace('models/', ''));
+          list.push('imagen-3.0-generate-002');
+          return list;
         }
-        return [];
+        return ['imagen-3.0-generate-002'];
       } else {
         const headers: any = {};
         if (provider === 'claude') {
