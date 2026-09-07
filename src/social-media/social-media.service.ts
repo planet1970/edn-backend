@@ -85,8 +85,627 @@ export class SocialMediaService implements OnModuleInit {
     if (url.startsWith('http')) return url;
     const baseUrl = (process.env.BACKEND_URL || 'https://api.edirnego.com').replace(/\/$/, '');
     const cleanUrl = url.startsWith('/') ? url : `/${url}`;
-    return `${baseUrl}${cleanUrl}`;
-  }  // 1. Generate post content using specified AI APIs (or simulated)
+  }
+
+  // 1. Generate post content using specified AI APIs (or simulated)
+  private safeExtractAndParseJson(text: string): any {
+    if (!text) return null;
+    let clean = text.trim();
+    if (clean.includes('```')) {
+      const match = clean.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+      if (match && match[1]) {
+        clean = match[1].trim();
+      }
+    }
+    try {
+      return JSON.parse(clean);
+    } catch {
+      const firstBrace = clean.indexOf('{');
+      const lastBrace = clean.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        try {
+          return JSON.parse(clean.substring(firstBrace, lastBrace + 1));
+        } catch {
+          const captionMatch = clean.match(/"caption"\s*:\s*"([\s\S]*?)"(?=\s*,\s*"|\s*})/);
+          const imagePromptMatch = clean.match(/"imagePrompt"\s*:\s*"([\s\S]*?)"(?=\s*,\s*"|\s*})/);
+          const videoPromptMatch = clean.match(/"videoPrompt"\s*:\s*"([\s\S]*?)"(?=\s*,\s*"|\s*})/);
+          if (captionMatch || imagePromptMatch) {
+            return {
+              caption: captionMatch ? captionMatch[1].replace(/\\"/g, '"').replace(/\\n/g, '\n') : '',
+              imagePrompt: imagePromptMatch ? imagePromptMatch[1].replace(/\\"/g, '"') : '',
+              videoPrompt: videoPromptMatch ? videoPromptMatch[1].replace(/\\"/g, '"') : '',
+            };
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  private async executeSingleTextProvider(
+    provider: string,
+    model: string,
+    prompt: string,
+    platform: string,
+    tone: string,
+    aiSettings: any,
+    systemInstruction: string,
+    logs: string[]
+  ): Promise<{ caption: string; imagePrompt: string; videoPrompt: string; providerUsed: string }> {
+    let customTextConfig: any = null;
+    if (aiSettings.customModels && Array.isArray(aiSettings.customModels)) {
+      customTextConfig = (aiSettings.customModels as any[]).find(
+        (m: any) => String(m.id) === String(provider) || m.name === provider
+      );
+    }
+
+    if (customTextConfig) {
+      const customKey = customTextConfig.apiKey;
+      const cleanUrl = (customTextConfig.apiUrl || '').replace(/\/$/, '');
+      const modelName = customTextConfig.selectedModel || model;
+      if (!customKey) {
+        throw new Error(`Özel Sağlayıcı (${customTextConfig.name}) için API Anahtarı eksik.`);
+      }
+      const fetchUrl = cleanUrl.endsWith('/v1') ? `${cleanUrl}/chat/completions` : `${cleanUrl}/v1/chat/completions`;
+      logs.push(`Özel API (${customTextConfig.name}) ile metin üretiliyor... model: ${modelName}`);
+
+      const callApi = async (useJsonMode: boolean) => {
+        const body: any = {
+          model: modelName,
+          messages: [
+            { role: 'system', content: systemInstruction },
+            { role: 'user', content: `Konu/Prompt: "${prompt}"\nPlatform: ${platform}\nSes Tonu: ${tone}\n\nİçeriği oluştur:` }
+          ],
+          temperature: 0.7,
+        };
+        if (useJsonMode) {
+          body.response_format = { type: 'json_object' };
+        }
+        return await fetch(fetchUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${customKey}`,
+            'HTTP-Referer': 'http://localhost:5173',
+            'X-Title': 'EDN Sosyal Medya',
+          },
+          body: JSON.stringify(body),
+        });
+      };
+
+      let response = await callApi(true);
+      if (!response.ok) {
+        const errText = await response.text();
+        if (errText.includes('response_format') || errText.includes('json_object') || response.status === 400) {
+          logs.push(`JSON formatı desteklenmedi, standart metin formatı deneniyor...`);
+          response = await callApi(false);
+          if (!response.ok) {
+            const err2 = await response.text();
+            throw new Error(`Özel API (${customTextConfig.name}) Hatası [${response.status}]: ${err2}`);
+          }
+        } else {
+          throw new Error(`Özel API (${customTextConfig.name}) Hatası [${response.status}]: ${errText}`);
+        }
+      }
+
+      const resData = await response.json();
+      const rawText = resData.choices?.[0]?.message?.content || '';
+      const parsed = this.safeExtractAndParseJson(rawText);
+      if (!parsed || !parsed.caption) {
+        if (rawText.trim().length > 20 && !rawText.trim().startsWith('{')) {
+          return {
+            caption: rawText.trim(),
+            imagePrompt: prompt,
+            videoPrompt: prompt,
+            providerUsed: customTextConfig.name,
+          };
+        }
+        throw new Error(`Özel API (${customTextConfig.name}) geçerli JSON yanıtı döndürmedi.`);
+      }
+      return {
+        caption: parsed.caption,
+        imagePrompt: parsed.imagePrompt || '',
+        videoPrompt: parsed.videoPrompt || '',
+        providerUsed: customTextConfig.name,
+      };
+    }
+
+    if (provider === 'gemini') {
+      const geminiKey = aiSettings.geminiKey || process.env.GEMINI_API_KEY;
+      const cleanUrl = (aiSettings.geminiUrl || 'https://generativelanguage.googleapis.com').replace(/\/$/, '');
+      if (!geminiKey) {
+        throw new Error('Google Gemini API Anahtarı eksik veya tanımlanmamış.');
+      }
+      const modelName = model || 'gemini-2.5-flash';
+      logs.push(`Google Gemini (${modelName}) ile metin üretiliyor...`);
+      const response = await fetch(
+        `${cleanUrl}/v1beta/models/${modelName}:generateContent?key=${geminiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [
+              { role: 'user', parts: [{ text: `Konu/Prompt: "${prompt}"\nPlatform: ${platform}\nSes Tonu: ${tone}\n\nİçeriği oluştur:` }] }
+            ],
+            systemInstruction: { parts: [{ text: systemInstruction }] },
+            generationConfig: { responseMimeType: 'application/json', temperature: 0.7 }
+          })
+        }
+      );
+      if (!response.ok) {
+        const err = await response.text();
+        throw new Error(`Google Gemini Hatası [${response.status}]: ${err}`);
+      }
+      const resData = await response.json();
+      const rawText = resData.candidates?.[0]?.content?.parts?.[0]?.text;
+      const parsed = this.safeExtractAndParseJson(rawText);
+      if (!parsed || !parsed.caption) {
+        throw new Error('Google Gemini geçerli JSON içeriği döndürmedi.');
+      }
+      return {
+        caption: parsed.caption,
+        imagePrompt: parsed.imagePrompt || '',
+        videoPrompt: parsed.videoPrompt || '',
+        providerUsed: 'Google Gemini',
+      };
+    }
+
+    if (provider === 'openai') {
+      const openAiKey = aiSettings.openAiKey || process.env.OPENAI_API_KEY;
+      const cleanUrl = (aiSettings.openAiUrl || 'https://api.openai.com').replace(/\/$/, '');
+      if (!openAiKey) {
+        throw new Error('OpenAI API Anahtarı eksik veya tanımlanmamış.');
+      }
+      const modelName = model || 'gpt-4o-mini';
+      logs.push(`OpenAI (${modelName}) ile metin üretiliyor...`);
+      const response = await fetch(`${cleanUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${openAiKey}`,
+        },
+        body: JSON.stringify({
+          model: modelName,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: systemInstruction },
+            { role: 'user', content: `Konu/Prompt: "${prompt}"\nPlatform: ${platform}\nSes Tonu: ${tone}\n\nİçeriği oluştur:` }
+          ],
+          temperature: 0.7,
+        }),
+      });
+      if (!response.ok) {
+        const err = await response.text();
+        throw new Error(`OpenAI Hatası [${response.status}]: ${err}`);
+      }
+      const resData = await response.json();
+      const rawText = resData.choices?.[0]?.message?.content;
+      const parsed = this.safeExtractAndParseJson(rawText);
+      if (!parsed || !parsed.caption) {
+        throw new Error('OpenAI geçerli JSON içeriği döndürmedi.');
+      }
+      return {
+        caption: parsed.caption,
+        imagePrompt: parsed.imagePrompt || '',
+        videoPrompt: parsed.videoPrompt || '',
+        providerUsed: 'OpenAI',
+      };
+    }
+
+    if (provider === 'claude') {
+      const claudeKey = aiSettings.claudeKey || process.env.CLAUDE_API_KEY;
+      const cleanUrl = (aiSettings.claudeUrl || 'https://api.anthropic.com').replace(/\/$/, '');
+      if (!claudeKey) {
+        throw new Error('Claude API Anahtarı eksik veya tanımlanmamış.');
+      }
+      const modelName = model || 'claude-3-5-sonnet-20241022';
+      logs.push(`Anthropic Claude (${modelName}) ile metin üretiliyor...`);
+      const response = await fetch(`${cleanUrl}/v1/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': claudeKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: modelName,
+          max_tokens: 1500,
+          system: systemInstruction,
+          messages: [
+            { role: 'user', content: `Konu/Prompt: "${prompt}"\nPlatform: ${platform}\nSes Tonu: ${tone}\n\nİçeriği oluştur:` }
+          ]
+        })
+      });
+      if (!response.ok) {
+        const err = await response.text();
+        throw new Error(`Claude Hatası [${response.status}]: ${err}`);
+      }
+      const resData = await response.json();
+      const rawText = resData.content?.[0]?.text;
+      const parsed = this.safeExtractAndParseJson(rawText);
+      if (!parsed || !parsed.caption) {
+        throw new Error('Anthropic Claude geçerli JSON içeriği döndürmedi.');
+      }
+      return {
+        caption: parsed.caption,
+        imagePrompt: parsed.imagePrompt || '',
+        videoPrompt: parsed.videoPrompt || '',
+        providerUsed: 'Anthropic Claude',
+      };
+    }
+
+    if (provider === 'nvidia') {
+      const nvidiaKey = aiSettings.nvidiaKey;
+      const cleanUrl = (aiSettings.nvidiaUrl || 'https://integrate.api.nvidia.com/v1').replace(/\/$/, '');
+      if (!nvidiaKey) {
+        throw new Error('NVIDIA NIM API Anahtarı eksik veya tanımlanmamış.');
+      }
+      const modelName = model || 'meta/llama-3.3-70b-instruct';
+      const fetchUrl = cleanUrl.endsWith('/v1') ? `${cleanUrl}/chat/completions` : `${cleanUrl}/v1/chat/completions`;
+      logs.push(`NVIDIA NIM (${modelName}) ile metin üretiliyor...`);
+      const response = await fetch(fetchUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${nvidiaKey}`,
+        },
+        body: JSON.stringify({
+          model: modelName,
+          messages: [
+            { role: 'system', content: systemInstruction },
+            { role: 'user', content: `Konu/Prompt: "${prompt}"\nPlatform: ${platform}\nSes Tonu: ${tone}\n\nİçeriği oluştur:` }
+          ],
+          temperature: 0.7,
+        })
+      });
+      if (!response.ok) {
+        const err = await response.text();
+        throw new Error(`NVIDIA NIM Hatası [${response.status}]: ${err}`);
+      }
+      const resData = await response.json();
+      const rawText = resData.choices?.[0]?.message?.content;
+      const parsed = this.safeExtractAndParseJson(rawText);
+      if (!parsed || !parsed.caption) {
+        throw new Error('NVIDIA NIM geçerli JSON içeriği döndürmedi.');
+      }
+      return {
+        caption: parsed.caption,
+        imagePrompt: parsed.imagePrompt || '',
+        videoPrompt: parsed.videoPrompt || '',
+        providerUsed: 'NVIDIA NIM',
+      };
+    }
+
+    if (provider === 'groq') {
+      const groqKey = aiSettings.groqKey || process.env.GROQ_API_KEY;
+      const cleanUrl = (aiSettings.groqUrl || 'https://api.groq.com').replace(/\/$/, '');
+      if (!groqKey) {
+        throw new Error('Groq API Anahtarı eksik veya tanımlanmamış.');
+      }
+      const modelName = model || 'llama-3.3-70b-versatile';
+      const fetchUrl = cleanUrl.endsWith('/v1') ? `${cleanUrl}/chat/completions` : `${cleanUrl}/v1/chat/completions`;
+      logs.push(`Groq (${modelName}) ile metin üretiliyor...`);
+      const response = await fetch(fetchUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${groqKey}`,
+        },
+        body: JSON.stringify({
+          model: modelName,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: systemInstruction },
+            { role: 'user', content: `Konu/Prompt: "${prompt}"\nPlatform: ${platform}\nSes Tonu: ${tone}\n\nİçeriği oluştur:` }
+          ],
+          temperature: 0.7,
+        })
+      });
+      if (!response.ok) {
+        const err = await response.text();
+        throw new Error(`Groq Hatası [${response.status}]: ${err}`);
+      }
+      const resData = await response.json();
+      const rawText = resData.choices?.[0]?.message?.content;
+      const parsed = this.safeExtractAndParseJson(rawText);
+      if (!parsed || !parsed.caption) {
+        throw new Error('Groq geçerli JSON içeriği döndürmedi.');
+      }
+      return {
+        caption: parsed.caption,
+        imagePrompt: parsed.imagePrompt || '',
+        videoPrompt: parsed.videoPrompt || '',
+        providerUsed: 'Groq',
+      };
+    }
+
+    if (provider === 'grok') {
+      const grokKey = aiSettings.grokKey || process.env.GROK_API_KEY || process.env.XAI_API_KEY;
+      const cleanUrl = (aiSettings.grokUrl || 'https://api.x.ai').replace(/\/$/, '');
+      if (!grokKey) {
+        throw new Error('xAI Grok API Anahtarı eksik veya tanımlanmamış.');
+      }
+      const modelName = model || 'grok-2-latest';
+      const fetchUrl = cleanUrl.endsWith('/v1') ? `${cleanUrl}/chat/completions` : `${cleanUrl}/v1/chat/completions`;
+      logs.push(`xAI Grok (${modelName}) ile metin üretiliyor...`);
+      const response = await fetch(fetchUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${grokKey}`,
+        },
+        body: JSON.stringify({
+          model: modelName,
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: systemInstruction },
+            { role: 'user', content: `Konu/Prompt: "${prompt}"\nPlatform: ${platform}\nSes Tonu: ${tone}\n\nİçeriği oluştur:` }
+          ],
+          temperature: 0.7,
+        })
+      });
+      if (!response.ok) {
+        const err = await response.text();
+        throw new Error(`xAI Grok Hatası [${response.status}]: ${err}`);
+      }
+      const resData = await response.json();
+      const rawText = resData.choices?.[0]?.message?.content;
+      const parsed = this.safeExtractAndParseJson(rawText);
+      if (!parsed || !parsed.caption) {
+        throw new Error('xAI Grok geçerli JSON içeriği döndürmedi.');
+      }
+      return {
+        caption: parsed.caption,
+        imagePrompt: parsed.imagePrompt || '',
+        videoPrompt: parsed.videoPrompt || '',
+        providerUsed: 'xAI Grok',
+      };
+    }
+
+    throw new Error(`Bilinmeyen veya desteklenmeyen metin sağlayıcısı: "${provider}"`);
+  }
+
+  private async executeSingleImageProvider(
+    provider: string,
+    model: string,
+    imagePrompt: string,
+    prompt: string,
+    caption: string,
+    aiSettings: any,
+    logs: string[]
+  ): Promise<{ imageUrl: string; providerUsed: string }> {
+    let customImageConfig: any = null;
+    if (aiSettings.customModels && Array.isArray(aiSettings.customModels)) {
+      customImageConfig = (aiSettings.customModels as any[]).find(
+        (m: any) => String(m.id) === String(provider) || m.name === provider
+      );
+    }
+
+    if (customImageConfig) {
+      const customKey = customImageConfig.apiKey;
+      const cleanUrl = (customImageConfig.apiUrl || '').replace(/\/$/, '');
+      const modelName = customImageConfig.selectedModel || model;
+      if (!customKey) {
+        throw new Error(`Özel Görsel Sağlayıcı (${customImageConfig.name}) için API Anahtarı eksik.`);
+      }
+      const fetchUrl = cleanUrl.endsWith('/v1') ? `${cleanUrl}/images/generations` : `${cleanUrl}/v1/images/generations`;
+      logs.push(`Özel API (${customImageConfig.name}) ile görsel üretiliyor... model: ${modelName}`);
+      const response = await fetch(fetchUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${customKey}`,
+          'HTTP-Referer': 'http://localhost:5173',
+          'X-Title': 'EDN Sosyal Medya',
+        },
+        body: JSON.stringify({
+          model: modelName,
+          prompt: imagePrompt || prompt,
+          n: 1,
+          size: '1024x1024'
+        })
+      });
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Özel model görsel API hatası [${response.status}]: ${errText}`);
+      }
+      const data = await response.json();
+      let img = data.data?.[0]?.url || data.data?.[0]?.b64_json || '';
+      if (img && !img.startsWith('data:') && !img.startsWith('http')) {
+        img = `data:image/png;base64,${img}`;
+      }
+      if (!img) throw new Error('Özel model görsel verisi döndürmedi.');
+      return { imageUrl: img, providerUsed: customImageConfig.name };
+    }
+
+    if (provider === 'huggingface') {
+      const hfKey = aiSettings.huggingFaceKey || process.env.HUGGINGFACE_API_KEY;
+      if (!hfKey) {
+        throw new Error('Hugging Face API Anahtarı eksik veya tanımlanmamış.');
+      }
+      const finalPrompt = imagePrompt || prompt;
+      const uniquePrompt = `${finalPrompt.trim()} [Variation: ${Math.random().toString(36).substring(7)}]`;
+      const modelPath = model || 'black-forest-labs/FLUX.1-schnell';
+      logs.push(`Hugging Face (${modelPath}) ile görsel üretiliyor...`);
+      const img = await this.generateHuggingFaceImage(modelPath, uniquePrompt, hfKey);
+      return { imageUrl: img, providerUsed: `Hugging Face (${modelPath})` };
+    }
+
+    if (provider === 'fal') {
+      const falKey = aiSettings.falKey || process.env.FAL_KEY || process.env.FAL_API_KEY;
+      const falUrl = (aiSettings.falUrl || 'https://fal.run').replace(/\/$/, '');
+      if (!falKey) {
+        throw new Error('Fal.ai API Anahtarı eksik veya tanımlanmamış.');
+      }
+      let modelName = model || 'fal-ai/flux/schnell';
+      if (modelName === 'flux' || modelName === 'flux-schnell') modelName = 'fal-ai/flux/schnell';
+      else if (modelName === 'flux-dev') modelName = 'fal-ai/flux/dev';
+      else if (modelName === 'flux-pro') modelName = 'fal-ai/flux/pro';
+
+      logs.push(`Fal.ai (${modelName}) ile görsel üretiliyor...`);
+      const response = await fetch(`${falUrl}/${modelName}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Key ${falKey}`
+        },
+        body: JSON.stringify({
+          prompt: imagePrompt || prompt,
+          image_size: 'square_hd'
+        })
+      });
+      if (!response.ok) {
+        const errText = await response.text();
+        if (response.status === 403 && errText.includes('TOP_UP')) {
+          throw new Error('Fal.ai Bakiye Yetersiz: Hesabınız kilitli veya krediniz bitmiş (Top-Up gerekli).');
+        }
+        throw new Error(`Fal.ai Hatası [${response.status}]: ${errText}`);
+      }
+      const data = await response.json();
+      let img = data.images?.[0]?.url || '';
+      if (img && !img.startsWith('data:') && !img.startsWith('http')) {
+        img = `data:image/png;base64,${img}`;
+      }
+      if (!img) throw new Error('Fal.ai görsel verisi döndürmedi.');
+      return { imageUrl: img, providerUsed: `Fal.ai (${modelName})` };
+    }
+
+    if (provider === 'dalle') {
+      const openAiKey = aiSettings.openAiKey || process.env.OPENAI_API_KEY;
+      const openAiUrl = (aiSettings.openAiUrl || 'https://api.openai.com').replace(/\/$/, '');
+      if (!openAiKey) {
+        throw new Error('OpenAI API Anahtarı eksik veya tanımlanmamış.');
+      }
+      const modelName = model || 'dall-e-3';
+      logs.push(`OpenAI DALL-E (${modelName}) ile görsel üretiliyor...`);
+      const response = await fetch(`${openAiUrl}/v1/images/generations`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${openAiKey}`
+        },
+        body: JSON.stringify({
+          model: modelName,
+          prompt: imagePrompt || prompt,
+          n: 1,
+          size: '1024x1024'
+        })
+      });
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`DALL-E Hatası [${response.status}]: ${errText}`);
+      }
+      const data = await response.json();
+      const img = data.data?.[0]?.url || '';
+      if (!img) throw new Error('DALL-E görsel verisi döndürmedi.');
+      return { imageUrl: img, providerUsed: `OpenAI DALL-E (${modelName})` };
+    }
+
+    if (provider === 'gemini') {
+      const geminiKey = aiSettings.geminiKey || process.env.GEMINI_API_KEY;
+      const geminiUrl = (aiSettings.geminiUrl || 'https://generativelanguage.googleapis.com').replace(/\/$/, '');
+      if (!geminiKey) {
+        throw new Error('Google Gemini API Anahtarı eksik veya tanımlanmamış.');
+      }
+      let modelName = model || 'imagen-3.0-generate-002';
+      logs.push(`Google Gemini (${modelName}) ile görsel üretiliyor...`);
+      const response = await fetch(
+        `${geminiUrl}/v1beta/models/${modelName}:predict?key=${geminiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            instances: [{ prompt: imagePrompt || prompt }],
+            parameters: { sampleCount: 1, aspectRatio: '1:1' }
+          })
+        }
+      );
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Gemini Imagen Hatası [${response.status}]: ${errText}`);
+      }
+      const data = await response.json();
+      const base64 = data.predictions?.[0]?.bytesBase64Encoded;
+      if (base64) {
+        return { imageUrl: `data:image/png;base64,${base64}`, providerUsed: `Gemini Imagen (${modelName})` };
+      }
+      throw new Error('Gemini Imagen görsel verisi döndürmedi.');
+    }
+
+    if (provider === 'stability') {
+      const stabilityKey = aiSettings.stabilityKey || process.env.STABILITY_API_KEY;
+      if (!stabilityKey) {
+        throw new Error('Stability AI API Anahtarı eksik veya tanımlanmamış.');
+      }
+      logs.push('Stability AI ile görsel üretiliyor...');
+      const response = await fetch(
+        'https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            Authorization: `Bearer ${stabilityKey}`
+          },
+          body: JSON.stringify({
+            text_prompts: [{ text: imagePrompt || prompt }],
+            cfg_scale: 7,
+            height: 1024,
+            width: 1024,
+            samples: 1,
+            steps: 30
+          })
+        }
+      );
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Stability AI Hatası [${response.status}]: ${errText}`);
+      }
+      const data = await response.json();
+      const base64 = data.artifacts?.[0]?.base64;
+      if (base64) {
+        return { imageUrl: `data:image/png;base64,${base64}`, providerUsed: 'Stability AI' };
+      }
+      throw new Error('Stability AI görsel verisi döndürmedi.');
+    }
+
+    if (provider === 'grok') {
+      const grokKey = aiSettings.grokKey || process.env.GROK_API_KEY || process.env.XAI_API_KEY;
+      const grokUrl = (aiSettings.grokUrl || 'https://api.x.ai').replace(/\/$/, '');
+      if (!grokKey) {
+        throw new Error('xAI Grok API Anahtarı eksik veya tanımlanmamış.');
+      }
+      const modelName = model || 'grok-imagine-image-quality';
+      logs.push(`xAI Grok (${modelName}) ile görsel üretiliyor...`);
+      const response = await fetch(`${grokUrl}/v1/images/generations`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${grokKey}`
+        },
+        body: JSON.stringify({
+          model: modelName,
+          prompt: imagePrompt || prompt,
+          n: 1,
+          size: '1024x1024'
+        })
+      });
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Grok Hatası [${response.status}]: ${errText}`);
+      }
+      const data = await response.json();
+      let img = data.data?.[0]?.url || data.data?.[0]?.b64_json || '';
+      if (img && !img.startsWith('data:') && !img.startsWith('http')) {
+        img = `data:image/png;base64,${img}`;
+      }
+      if (!img) throw new Error('Grok görsel verisi döndürmedi.');
+      return { imageUrl: img, providerUsed: `xAI Grok (${modelName})` };
+    }
+
+    throw new Error(`Bilinmeyen veya desteklenmeyen görsel sağlayıcısı: "${provider}"`);
+  }
+
   async generatePost(
     prompt: string,
     platform: string,
@@ -101,40 +720,29 @@ export class SocialMediaService implements OnModuleInit {
     imageModel?: string,
   ) {
     const aiSettings = await this.getAiSettings();
-    
-    // Resolve providers and models with fallbacks to defaults
-    let activeTextProvider = textProvider || aiSettings.defaultTextProvider || 'gemini';
-    let activeTextModel = textModel || aiSettings.defaultTextModel || 'gemini-2.5-flash';
-    let activeImageProvider = imageProvider || aiSettings.defaultImageProvider || 'huggingface';
-    let activeImageModel = imageModel || aiSettings.defaultImageModel || 'flux';
-
-    // Find custom configs if any
-    let customTextConfig: any = null;
-    let customImageConfig: any = null;
-    if (aiSettings.customModels && Array.isArray(aiSettings.customModels)) {
-      const modelsList = aiSettings.customModels as any[];
-      customTextConfig = modelsList.find(
-        (m: any) => String(m.id) === String(activeTextProvider) || m.name === activeTextProvider
-      );
-      customImageConfig = modelsList.find(
-        (m: any) => String(m.id) === String(activeImageProvider) || m.name === activeImageProvider
-      );
-    }
-
     const logs: string[] = [];
+
     let caption = '';
     let imagePrompt = '';
     let videoPrompt = '';
     let imageUrl = '';
     let videoUrl = '';
-    let textProviderUsed = customTextConfig ? customTextConfig.name : activeTextProvider;
-    let imageProviderUsed = customImageConfig ? customImageConfig.name : activeImageProvider;
+    let textProviderUsed = '';
+    let imageProviderUsed = '';
     let videoProviderUsed = videoProvider;
+    let textGenerationError = '';
     let imageGenerationError = '';
 
-    const isStory = postType === 'STORY';
+    const primaryTextProvider = textProvider || aiSettings.defaultTextProvider || 'gemini';
+    const primaryTextModel = textModel || aiSettings.defaultTextModel || 'gemini-2.5-flash';
+    const fallbackTextProvider = aiSettings.fallbackTextProvider;
+    const fallbackTextModel = aiSettings.fallbackTextModel;
 
-    // System instruction for Text AIs
+    const primaryImageProvider = imageProvider || aiSettings.defaultImageProvider || 'huggingface';
+    const primaryImageModel = imageModel || aiSettings.defaultImageModel || 'flux';
+    const fallbackImageProvider = aiSettings.fallbackImageProvider;
+    const fallbackImageModel = aiSettings.fallbackImageModel;
+
     const systemInstruction = `You are a social media post generator.
 You must output a JSON object containing:
 {
@@ -145,642 +753,131 @@ You must output a JSON object containing:
 
 Do not add any other stylistic rules, presets, or constraints. Return ONLY a valid JSON object.`;
 
-    // --- 1. Text Generation ---
-    if (customTextConfig) {
-      const customKey = customTextConfig.apiKey;
-      const customUrl = customTextConfig.apiUrl.replace(/\/$/, '');
-      const modelName = customTextConfig.selectedModel || activeTextModel;
+    // 1. Text Generation with Fallback
+    try {
+      const res = await this.executeSingleTextProvider(
+        primaryTextProvider,
+        primaryTextModel,
+        prompt,
+        platform,
+        tone,
+        aiSettings,
+        systemInstruction,
+        logs
+      );
+      caption = res.caption;
+      imagePrompt = res.imagePrompt;
+      videoPrompt = res.videoPrompt;
+      textProviderUsed = res.providerUsed;
+      logs.push(`Metin ana model (${textProviderUsed}) ile başarıyla üretildi.`);
+    } catch (err1: any) {
+      this.logger.warn(`Ana metin modeli (${primaryTextProvider}) başarısız oldu: ${err1.message}`);
+      logs.push(`Ana metin modeli (${primaryTextProvider}) hatası: ${err1.message}`);
+      this.checkAiTokenError(err1, `Metin Modeli (${primaryTextProvider})`);
 
-      try {
-        logs.push(`Özel API (${customTextConfig.name}) ile metin üretiliyor... model: ${modelName}`);
-        const response = await fetch(`${customUrl}/v1/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${customKey}`,
-          },
-          body: JSON.stringify({
-            model: modelName,
-            response_format: { type: 'json_object' },
-            messages: [
-              { role: 'system', content: systemInstruction },
-              { role: 'user', content: `Konu/Prompt: "${prompt}"\nPlatform: ${platform}\nSes Tonu: ${tone}\n\nİçeriği oluştur:` }
-            ],
-            temperature: 0.7,
-          }),
-        });
-
-        if (!response.ok) {
-          const errText = await response.text();
-          throw new Error(`Özel model API hatası: ${response.statusText} - ${errText}`);
-        }
-
-        const resData = await response.json();
-        const textResponse = resData.choices?.[0]?.message?.content;
-        if (textResponse) {
-          const parsed = JSON.parse(textResponse);
-          caption = parsed.caption || '';
-          imagePrompt = parsed.imagePrompt || '';
-          videoPrompt = parsed.videoPrompt || '';
-          logs.push(`Metin özel model (${customTextConfig.name} - ${modelName}) ile başarıyla üretildi.`);
-        }
-      } catch (error) {
-        this.checkAiTokenError(error, `Özel Model (${customTextConfig.name})`);
-        logs.push(`Özel model metin üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
-        textProviderUsed = 'simulation';
-      }
-    } else if (activeTextProvider === 'openai') {
-      const openAiKey = aiSettings.openAiKey || process.env.OPENAI_API_KEY;
-      const openAiUrl = (aiSettings.openAiUrl || 'https://api.openai.com').replace(/\/$/, '');
-      if (!openAiKey) {
-        logs.push('OPENAI_API_KEY bulunamadı. Metin üretimi için simülasyon moduna geçiliyor.');
-        textProviderUsed = 'simulation';
-      } else {
+      let fallbackSuccess = false;
+      if (fallbackTextProvider && (fallbackTextProvider !== primaryTextProvider || fallbackTextModel !== primaryTextModel)) {
         try {
-          const response = await fetch(`${openAiUrl}/v1/chat/completions`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${openAiKey}`,
-            },
-            body: JSON.stringify({
-              model: activeTextModel || 'gpt-4o-mini',
-              response_format: { type: 'json_object' },
-              messages: [
-                { role: 'system', content: systemInstruction },
-                { role: 'user', content: `Konu/Prompt: "${prompt}"\nPlatform: ${platform}\nSes Tonu: ${tone}\n\nİçeriği oluştur:` }
-              ],
-              temperature: 0.7,
-            }),
-          });
-
-          if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`OpenAI API hatası: ${response.statusText} - ${errText}`);
-          }
-
-          const resData = await response.json();
-          const textResponse = resData.choices?.[0]?.message?.content;
-          if (textResponse) {
-            const parsed = JSON.parse(textResponse);
-            caption = parsed.caption || '';
-            imagePrompt = parsed.imagePrompt || '';
-            videoPrompt = parsed.videoPrompt || '';
-            logs.push(`Metin OpenAI (${activeTextModel}) ile başarıyla üretildi.`);
-          }
-        } catch (error) {
-          this.checkAiTokenError(error, 'OpenAI (Metin)');
-          logs.push(`OpenAI metin üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
-          textProviderUsed = 'simulation';
-        }
-      }
-    } else if (activeTextProvider === 'claude') {
-      const claudeKey = aiSettings.claudeKey || process.env.CLAUDE_API_KEY;
-      const claudeUrl = (aiSettings.claudeUrl || 'https://api.anthropic.com').replace(/\/$/, '');
-      if (!claudeKey) {
-        logs.push('CLAUDE_API_KEY bulunamadı. Metin üretimi için simülasyon moduna geçiliyor.');
-        textProviderUsed = 'simulation';
-      } else {
-        try {
-          const response = await fetch(`${claudeUrl}/v1/messages`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': claudeKey,
-              'anthropic-version': '2023-06-01'
-            },
-            body: JSON.stringify({
-              model: activeTextModel || 'claude-3-5-sonnet-20241022',
-              max_tokens: 1000,
-              system: systemInstruction,
-              messages: [
-                { role: 'user', content: `Konu/Prompt: "${prompt}"\nPlatform: ${platform}\nSes Tonu: ${tone}\n\nİçeriği oluştur:` }
-              ]
-            })
-          });
-
-          if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`Claude API hatası: ${response.statusText} - ${errText}`);
-          }
-
-          const resData = await response.json();
-          const textResponse = resData.content?.[0]?.text;
-          if (textResponse) {
-            const parsed = JSON.parse(textResponse);
-            caption = parsed.caption || '';
-            imagePrompt = parsed.imagePrompt || '';
-            videoPrompt = parsed.videoPrompt || '';
-            logs.push(`Metin Anthropic Claude (${activeTextModel}) ile başarıyla üretildi.`);
-          }
-        } catch (error) {
-          this.checkAiTokenError(error, 'Anthropic Claude (Metin)');
-          logs.push(`Claude metin üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
-          textProviderUsed = 'simulation';
-        }
-      }
-    } else if (activeTextProvider === 'gemini') {
-      const geminiKey = aiSettings.geminiKey || process.env.GEMINI_API_KEY;
-      const geminiUrl = (aiSettings.geminiUrl || 'https://generativelanguage.googleapis.com').replace(/\/$/, '');
-      if (!geminiKey) {
-        logs.push('GEMINI_API_KEY bulunamadı. Metin üretimi için simülasyon moduna geçiliyor.');
-        textProviderUsed = 'simulation';
-      } else {
-        try {
-          const response = await fetch(
-            `${geminiUrl}/v1beta/models/${activeTextModel || 'gemini-2.5-flash'}:generateContent?key=${geminiKey}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                contents: [
-                  { role: 'user', parts: [{ text: `Konu/Prompt: "${prompt}"\nPlatform: ${platform}\nSes Tonu: ${tone}\n\nİçeriği oluştur:` }] }
-                ],
-                systemInstruction: { parts: [{ text: systemInstruction }] },
-                generationConfig: { responseMimeType: 'application/json', temperature: 0.7 }
-              })
-            }
+          logs.push(`Yedek metin modeline (${fallbackTextProvider} - ${fallbackTextModel}) geçiliyor...`);
+          const res = await this.executeSingleTextProvider(
+            fallbackTextProvider,
+            fallbackTextModel,
+            prompt,
+            platform,
+            tone,
+            aiSettings,
+            systemInstruction,
+            logs
           );
-
-          if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`Gemini API hatası: ${response.statusText} - ${errText}`);
-          }
-
-          const resData = await response.json();
-          const textResponse = resData.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (textResponse) {
-            const parsed = JSON.parse(textResponse);
-            caption = parsed.caption || '';
-            imagePrompt = parsed.imagePrompt || '';
-            videoPrompt = parsed.videoPrompt || '';
-            logs.push(`Metin Google Gemini (${activeTextModel}) ile başarıyla üretildi.`);
-          }
-        } catch (error) {
-          this.checkAiTokenError(error, 'Google Gemini (Metin)');
-          logs.push(`Gemini metin üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
-          textProviderUsed = 'simulation';
+          caption = res.caption;
+          imagePrompt = res.imagePrompt;
+          videoPrompt = res.videoPrompt;
+          textProviderUsed = `${res.providerUsed} (Yedek Model)`;
+          logs.push(`Metin yedek model (${textProviderUsed}) ile başarıyla üretildi.`);
+          fallbackSuccess = true;
+        } catch (err2: any) {
+          this.logger.warn(`Yedek metin modeli (${fallbackTextProvider}) da başarısız oldu: ${err2.message}`);
+          logs.push(`Yedek metin modeli (${fallbackTextProvider}) hatası: ${err2.message}`);
+          textGenerationError = `Ana Model (${primaryTextProvider}): ${err1.message} | Yedek Model (${fallbackTextProvider}): ${err2.message}`;
         }
+      } else {
+        textGenerationError = `Ana Model (${primaryTextProvider}): ${err1.message}`;
+      }
+
+      if (!fallbackSuccess) {
+        const sim = this.getSimulatedResponse(prompt, platform, tone);
+        caption = sim.caption;
+        imagePrompt = sim.imagePrompt;
+        videoPrompt = `A beautiful high-quality cinematic video showing historical ${prompt} in Edirne, Turkey.`;
+        textProviderUsed = 'simulation';
+        logs.push('Tüm metin modelleri başarısız oldu. Simülasyon moduna geçildi.');
       }
     }
 
-    // Run simulation fallback
-    if (textProviderUsed === 'simulation' || !caption) {
-      const sim = this.getSimulatedResponse(prompt, platform, tone);
-      caption = sim.caption;
-      imagePrompt = sim.imagePrompt;
-      videoPrompt = `A beautiful high-quality cinematic video showing historical ${prompt} in Edirne, Turkey.`;
-      logs.push('Simülasyon metin ve promptları üretildi.');
-    }
-
-    // Ensure we have a valid imagePrompt if it was not returned or is empty
+    // Ensure valid imagePrompt
     if (includeImage && (!imagePrompt || imagePrompt.trim() === '')) {
-      imagePrompt = `A photo representing: ${caption || prompt}`;
-      logs.push(`Görsel promptu otomatik olarak üretildi: "${imagePrompt}"`);
+      imagePrompt = `A high quality photo representing: ${caption.substring(0, 100) || prompt}`;
     }
 
-    // --- 2. Image Generation ---
+    // 2. Image Generation with Fallback
     if (includeImage) {
-      if (customImageConfig) {
-        const customKey = customImageConfig.apiKey;
-        const customUrl = customImageConfig.apiUrl.replace(/\/$/, '');
-        const modelName = customImageConfig.selectedModel || activeImageModel;
+      try {
+        const res = await this.executeSingleImageProvider(
+          primaryImageProvider,
+          primaryImageModel,
+          imagePrompt,
+          prompt,
+          caption,
+          aiSettings,
+          logs
+        );
+        imageUrl = res.imageUrl;
+        imageProviderUsed = res.providerUsed;
+        logs.push(`Görsel ana model (${imageProviderUsed}) ile başarıyla üretildi.`);
+      } catch (err1: any) {
+        this.logger.warn(`Ana görsel modeli (${primaryImageProvider}) başarısız oldu: ${err1.message}`);
+        logs.push(`Ana görsel modeli (${primaryImageProvider}) hatası: ${err1.message}`);
+        this.checkAiTokenError(err1, `Görsel Modeli (${primaryImageProvider})`);
 
-        try {
-          logs.push(`Özel API (${customImageConfig.name}) ile görsel üretiliyor... model: ${modelName}`);
-          const response = await fetch(`${customUrl}/v1/images/generations`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${customKey}`
-            },
-            body: JSON.stringify({
-              model: modelName,
-              prompt: imagePrompt,
-              n: 1,
-              size: '1024x1024'
-            })
-          });
-
-          if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`Özel model görsel API hatası: ${response.statusText} - ${errText}`);
-          }
-
-          const data = await response.json();
-          imageUrl = data.data?.[0]?.url || data.data?.[0]?.b64_json || '';
-          if (imageUrl && !imageUrl.startsWith('data:') && !imageUrl.startsWith('http')) {
-            imageUrl = `data:image/png;base64,${imageUrl}`;
-          }
-          logs.push(`Görsel özel model (${customImageConfig.name} - ${modelName}) ile başarıyla üretildi.`);
-        } catch (error) {
-          this.checkAiTokenError(error, `Özel Görsel Modeli (${customImageConfig.name})`);
-          logs.push(`Özel model görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
-          imageProviderUsed = 'simulation';
-          imageGenerationError = `Özel model (${customImageConfig.name}) hatası: ${error.message}`;
-        }
-      } else if (activeImageProvider === 'dalle') {
-        const openAiKey = aiSettings.openAiKey || process.env.OPENAI_API_KEY;
-        const openAiUrl = (aiSettings.openAiUrl || 'https://api.openai.com').replace(/\/$/, '');
-        if (!openAiKey) {
-          logs.push('OPENAI_API_KEY bulunamadı. DALL-E görsel üretimi için simülasyon moduna geçiliyor.');
-          imageProviderUsed = 'simulation';
-          imageGenerationError = 'OPENAI_API_KEY bulunamadı.';
-        } else {
+        let fallbackSuccess = false;
+        if (fallbackImageProvider && (fallbackImageProvider !== primaryImageProvider || fallbackImageModel !== primaryImageModel)) {
           try {
-            const response = await fetch(`${openAiUrl}/v1/images/generations`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${openAiKey}`
-              },
-              body: JSON.stringify({
-                model: activeImageModel || 'dall-e-3',
-                prompt: imagePrompt,
-                n: 1,
-                size: '1024x1024'
-              })
-            });
-
-            if (!response.ok) {
-              const errText = await response.text();
-              throw new Error(`DALL-E hatası: ${response.statusText} - ${errText}`);
-            }
-
-            const data = await response.json();
-            imageUrl = data.data?.[0]?.url || '';
-            logs.push(`Görsel OpenAI DALL-E (${activeImageModel || 'dall-e-3'}) ile başarıyla üretildi.`);
-          } catch (error) {
-            this.checkAiTokenError(error, 'OpenAI DALL-E 3 (Görsel)');
-            logs.push(`DALL-E görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
-            imageProviderUsed = 'simulation';
-            imageGenerationError = `DALL-E hatası: ${error.message}`;
-          }
-        }
-      } else if (activeImageProvider === 'stability') {
-        const stabilityKey = aiSettings.stabilityKey || process.env.STABILITY_API_KEY;
-        if (!stabilityKey) {
-          logs.push('STABILITY_API_KEY bulunamadı. Stability AI görsel üretimi için simülasyon moduna geçiliyor.');
-          imageProviderUsed = 'simulation';
-          imageGenerationError = 'STABILITY_API_KEY bulunamadı.';
-        } else {
-          try {
-            const response = await fetch(
-              'https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image',
-              {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  Accept: 'application/json',
-                  Authorization: `Bearer ${stabilityKey}`
-                },
-                body: JSON.stringify({
-                  text_prompts: [{ text: imagePrompt }],
-                  cfg_scale: 7,
-                  height: 1024,
-                  width: 1024,
-                  samples: 1,
-                  steps: 30
-                })
-              }
+            logs.push(`Yedek görsel modeline (${fallbackImageProvider} - ${fallbackImageModel}) geçiliyor...`);
+            const res = await this.executeSingleImageProvider(
+              fallbackImageProvider,
+              fallbackImageModel,
+              imagePrompt,
+              prompt,
+              caption,
+              aiSettings,
+              logs
             );
-
-            if (!response.ok) {
-              const errText = await response.text();
-              throw new Error(`Stability AI hatası: ${response.statusText} - ${errText}`);
-            }
-
-            const data = await response.json();
-            const base64 = data.artifacts?.[0]?.base64;
-            if (base64) {
-              imageUrl = `data:image/png;base64,${base64}`;
-              logs.push('Görsel Stability AI ile başarıyla üretildi.');
-            }
-          } catch (error) {
-            this.checkAiTokenError(error, 'Stability AI (Görsel)');
-            logs.push(`Stability AI görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
-            imageProviderUsed = 'simulation';
-            imageGenerationError = `Stability AI hatası: ${error.message}`;
+            imageUrl = res.imageUrl;
+            imageProviderUsed = `${res.providerUsed} (Yedek Model)`;
+            logs.push(`Görsel yedek model (${imageProviderUsed}) ile başarıyla üretildi.`);
+            fallbackSuccess = true;
+          } catch (err2: any) {
+            this.logger.warn(`Yedek görsel modeli (${fallbackImageProvider}) da başarısız oldu: ${err2.message}`);
+            logs.push(`Yedek görsel modeli (${fallbackImageProvider}) hatası: ${err2.message}`);
+            imageGenerationError = `Ana Görsel (${primaryImageProvider}): ${err1.message} | Yedek Görsel (${fallbackImageProvider}): ${err2.message}`;
           }
+        } else {
+          imageGenerationError = `Ana Görsel (${primaryImageProvider}): ${err1.message}`;
         }
-      } else if (activeImageProvider === 'gemini') {
-        const geminiKey = aiSettings.geminiKey || process.env.GEMINI_API_KEY;
-        const geminiUrl = (aiSettings.geminiUrl || 'https://generativelanguage.googleapis.com').replace(/\/$/, '');
-        if (!geminiKey) {
-          logs.push('GEMINI_API_KEY bulunamadı. Gemini görsel üretimi için simülasyon moduna geçiliyor.');
+
+        if (!fallbackSuccess) {
+          imageUrl = `https://picsum.photos/800/800?random=${Date.now()}`;
           imageProviderUsed = 'simulation';
-          imageGenerationError = 'GEMINI_API_KEY bulunamadı.';
-        } else {
-          try {
-            let modelName = activeImageModel;
-            if (!modelName || !modelName.startsWith('imagen-') || modelName.startsWith('imagen-3.')) {
-              modelName = 'imagen-4.0-generate-001';
-            }
-            logs.push(`Google Gemini (${modelName}) ile görsel üretiliyor...`);
-            const response = await fetch(
-              `${geminiUrl}/v1beta/models/${modelName}:predict?key=${geminiKey}`,
-              {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  instances: [{ prompt: imagePrompt }],
-                  parameters: { sampleCount: 1, aspectRatio: '1:1' }
-                })
-              }
-            );
-
-            if (!response.ok) {
-              const errText = await response.text();
-              throw new Error(`Gemini Imagen hatası: ${response.statusText} - ${errText}`);
-            }
-
-            const data = await response.json();
-            const base64 = data.predictions?.[0]?.bytesBase64Encoded;
-            if (base64) {
-              imageUrl = `data:image/png;base64,${base64}`;
-              logs.push(`Görsel Google Gemini Imagen (${modelName}) ile başarıyla üretildi.`);
-            } else {
-              throw new Error('Görsel verisi (bytesBase64Encoded) yanıttan alınamadı.');
-            }
-          } catch (error) {
-            this.checkAiTokenError(error, 'Google Gemini Imagen (Görsel)');
-            logs.push(`Gemini Imagen görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
-            imageProviderUsed = 'simulation';
-            imageGenerationError = `Gemini Imagen hatası: ${error.message}`;
-          }
+          logs.push('Tüm görsel modelleri başarısız oldu. Stok görsel atandı.');
         }
-      } else if (activeImageProvider === 'huggingface') {
-        const hfKey = aiSettings.huggingFaceKey || process.env.HUGGINGFACE_API_KEY;
-        if (!hfKey) {
-          logs.push('HUGGINGFACE_API_KEY bulunamadı. Hugging Face görsel üretimi için simülasyon moduna geçiliyor.');
-          imageProviderUsed = 'simulation';
-          imageGenerationError = 'HUGGINGFACE_API_KEY bulunamadı.';
-        } else {
-          try {
-            // Eğer imagePrompt boş gelmişse, metinden (caption) veya prompt'tan bir tane oluşturalım
-            let finalImagePrompt = imagePrompt;
-            if (!finalImagePrompt || finalImagePrompt.trim() === '') {
-              finalImagePrompt = `A high quality image representing: ${caption.substring(0, 100) || prompt}`;
-            }
-
-            // Benzersizlik katmak için rastgele bir seed veya benzersiz bir string ekleyelim ki hep aynı görsel üretilmesin
-            const uniquePrompt = `${finalImagePrompt.trim()} [Variation: ${Math.random().toString(36).substring(7)}]`;
-
-            const modelPath = activeImageModel || 'black-forest-labs/FLUX.1-schnell';
-            logs.push(`Hugging Face (${modelPath}) ile görsel üretiliyor...`);
-            imageUrl = await this.generateHuggingFaceImage(modelPath, uniquePrompt, hfKey);
-            logs.push(`Görsel Hugging Face (${modelPath}) ile başarıyla üretildi.`);
-          } catch (error) {
-            this.checkAiTokenError(error, 'Hugging Face FLUX (Görsel)');
-            logs.push(`Hugging Face görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
-            imageProviderUsed = 'simulation';
-            imageGenerationError = `Hugging Face hatası: ${error.message}`;
-          }
-        }
-      } else if (activeImageProvider === 'grok') {
-        const grokKey = aiSettings.grokKey || process.env.GROK_API_KEY || process.env.XAI_API_KEY;
-        const grokUrl = (aiSettings.grokUrl || 'https://api.x.ai').replace(/\/$/, '');
-        if (!grokKey) {
-          logs.push('GROK_API_KEY bulunamadı. Grok görsel üretimi için simülasyon moduna geçiliyor.');
-          imageProviderUsed = 'simulation';
-          imageGenerationError = 'GROK_API_KEY bulunamadı.';
-        } else {
-          try {
-            const modelName = activeImageModel || 'grok-imagine-image-quality';
-            logs.push(`xAI Grok (${modelName}) ile görsel üretiliyor...`);
-            const response = await fetch(`${grokUrl}/v1/images/generations`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${grokKey}`
-              },
-              body: JSON.stringify({
-                model: modelName,
-                prompt: imagePrompt || prompt,
-                n: 1,
-                size: '1024x1024'
-              })
-            });
-
-            if (!response.ok) {
-              const errText = await response.text();
-              throw new Error(`Grok hatası: ${response.statusText} - ${errText}`);
-            }
-
-            const data = await response.json();
-            imageUrl = data.data?.[0]?.url || data.data?.[0]?.b64_json || '';
-            if (imageUrl && !imageUrl.startsWith('data:') && !imageUrl.startsWith('http')) {
-              imageUrl = `data:image/png;base64,${imageUrl}`;
-            }
-            logs.push(`Görsel xAI Grok (${modelName}) ile başarıyla üretildi.`);
-          } catch (error) {
-            this.checkAiTokenError(error, 'xAI Grok (Görsel)');
-            logs.push(`Grok görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
-            imageProviderUsed = 'simulation';
-            imageGenerationError = `Grok hatası: ${error.message}`;
-          }
-        }
-      } else if (activeImageProvider === 'groq') {
-        const groqKey = aiSettings.groqKey || process.env.GROQ_API_KEY;
-        const groqUrl = (aiSettings.groqUrl || 'https://api.groq.com').replace(/\/$/, '');
-        if (!groqKey) {
-          logs.push('GROQ_API_KEY bulunamadı. Groq görsel üretimi için simülasyon moduna geçiliyor.');
-          imageProviderUsed = 'simulation';
-          imageGenerationError = 'GROQ_API_KEY bulunamadı.';
-        } else {
-          if (groqUrl !== 'https://api.groq.com' && groqUrl !== 'https://api.groq.com/openai') {
-            try {
-              const modelName = activeImageModel || 'llama-3.3-70b-specdec';
-              logs.push(`Özel Groq Endpoint (${groqUrl}) ile görsel üretiliyor...`);
-              const response = await fetch(`${groqUrl}/v1/images/generations`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${groqKey}`
-                },
-                body: JSON.stringify({
-                  model: modelName,
-                  prompt: imagePrompt || prompt,
-                  n: 1,
-                  size: '1024x1024'
-                })
-              });
-
-              if (!response.ok) {
-                const errText = await response.text();
-                throw new Error(`Groq Özel Endpoint hatası: ${response.statusText} - ${errText}`);
-              }
-
-              const data = await response.json();
-              imageUrl = data.data?.[0]?.url || data.data?.[0]?.b64_json || '';
-              if (imageUrl && !imageUrl.startsWith('data:') && !imageUrl.startsWith('http')) {
-                imageUrl = `data:image/png;base64,${imageUrl}`;
-              }
-              logs.push(`Görsel Özel Groq Endpoint ile başarıyla üretildi.`);
-            } catch (error) {
-              logs.push(`Özel Groq Endpoint hatası: ${error.message}. Prompt zenginleştirme moduna geçiliyor.`);
-            }
-          }
-
-          if (!imageUrl) {
-            try {
-              const hfKey = aiSettings.huggingFaceKey || process.env.HUGGINGFACE_API_KEY;
-              if (!hfKey) {
-                throw new Error('Hugging Face key bulunamadı. Groq görsel üretimi için Hugging Face gereklidir.');
-              }
-
-              logs.push('Groq LLM ile görsel promptu zenginleştiriliyor...');
-              const response = await fetch(`${groqUrl}/v1/chat/completions`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${groqKey}`
-                },
-                body: JSON.stringify({
-                  model: 'llama-3.3-70b-versatile',
-                  messages: [
-                    {
-                      role: 'user',
-                      content: `You are an expert prompt engineer. Expand the following image description into a highly detailed English prompt for Stable Diffusion/Flux. Make it artistic, specifying details about style, lighting, composition, and mood. Avoid adding humans or text. Prompt: ${imagePrompt || prompt}`
-                    }
-                  ]
-                })
-              });
-
-              let enhancedPrompt = imagePrompt || prompt;
-              if (response.ok) {
-                const data = await response.json();
-                const text = data.choices?.[0]?.message?.content;
-                if (text && text.trim()) {
-                  enhancedPrompt = text.trim();
-                  logs.push(`Prompt Groq ile başarıyla zenginleştirildi.`);
-                }
-              } else {
-                logs.push('Groq prompt zenginleştirme başarısız oldu, orijinal prompt kullanılacak.');
-              }
-
-              const modelPath = activeImageModel || 'black-forest-labs/FLUX.1-schnell';
-              logs.push(`Zenginleştirilmiş prompt Hugging Face (${modelPath}) modeline gönderiliyor...`);
-              imageUrl = await this.generateHuggingFaceImage(modelPath, enhancedPrompt, hfKey);
-              logs.push(`Görsel Groq + Hugging Face (${modelPath}) ile başarıyla üretildi.`);
-            } catch (error) {
-              this.checkAiTokenError(error, 'Groq / Hugging Face FLUX (Görsel)');
-              logs.push(`Groq görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
-              imageProviderUsed = 'simulation';
-              imageGenerationError = `Groq/FLUX hatası: ${error.message}`;
-            }
-          }
-        }
-      } else if (activeImageProvider === 'fal') {
-        const falKey = aiSettings.falKey || process.env.FAL_KEY || process.env.FAL_API_KEY;
-        const falUrl = (aiSettings.falUrl || 'https://fal.run').replace(/\/$/, '');
-        if (!falKey) {
-          logs.push('FAL_KEY bulunamadı. fal.ai görsel üretimi için simülasyon moduna geçiliyor.');
-          imageProviderUsed = 'simulation';
-          imageGenerationError = 'FAL_KEY bulunamadı.';
-        } else {
-          try {
-            let modelName = activeImageModel || 'fal-ai/flux/schnell';
-            if (modelName === 'flux' || modelName === 'flux-schnell') {
-              modelName = 'fal-ai/flux/schnell';
-            } else if (modelName === 'flux-dev') {
-              modelName = 'fal-ai/flux/dev';
-            } else if (modelName === 'flux-pro') {
-              modelName = 'fal-ai/flux/pro';
-            }
-            logs.push(`fal.ai (${modelName}) ile görsel üretiliyor...`);
-            const response = await fetch(`${falUrl}/${modelName}`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Key ${falKey}`
-              },
-              body: JSON.stringify({
-                prompt: imagePrompt || prompt,
-                image_size: 'square_hd'
-              })
-            });
-
-            if (!response.ok) {
-              const errText = await response.text();
-              throw new Error(`fal.ai hatası: ${response.statusText} - ${errText}`);
-            }
-
-            const data = await response.json();
-            imageUrl = data.images?.[0]?.url || '';
-            if (imageUrl && !imageUrl.startsWith('data:') && !imageUrl.startsWith('http')) {
-              imageUrl = `data:image/png;base64,${imageUrl}`;
-            }
-            logs.push(`Görsel fal.ai (${modelName}) ile başarıyla üretildi.`);
-          } catch (error) {
-            this.checkAiTokenError(error, 'fal.ai (Görsel)');
-            logs.push(`fal.ai görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
-            imageProviderUsed = 'simulation';
-            imageGenerationError = `fal.ai hatası: ${error.message}`;
-          }
-        }
-      }
-
-      if (imageProviderUsed === 'simulation' || !imageUrl) {
-        // Return a beautiful dynamic stock photo from LoremFlickr based on prompt keywords to prevent duplicate images
-        let tags = 'edirne,mosque,turkey';
-        const keywords = prompt.toLowerCase();
-        if (keywords.includes('yemek') || keywords.includes('tava') || keywords.includes('ciğer')) {
-          tags = 'food,turkish';
-        } else if (keywords.includes('nehir') || keywords.includes('meriç') || keywords.includes('köprü')) {
-          tags = 'river,bridge,turkey';
-        } else if (keywords.includes('saray') || keywords.includes('palace')) {
-          tags = 'palace,history';
-        } else {
-          const extracted = prompt
-            .toLowerCase()
-            .replace(/[^a-zA-Z0-9ığüşöç\s]/g, '')
-            .split(/\s+/)
-            .filter(w => w.length > 3)
-            .slice(0, 3);
-          if (extracted.length > 0) {
-            tags = extracted.join(',');
-          }
-        }
-        imageUrl = `https://picsum.photos/800/800?random=${Date.now()}`;
-        logs.push(`Simüle edilmiş dinamik görsel atandı (Picsum).`);
       }
     }
 
-    // --- 3. Video Generation ---
+    // 3. Video Generation
     if (includeVideo) {
-      if (videoProvider === 'runway') {
-        const runwayKey = process.env.RUNWAY_API_KEY;
-        if (!runwayKey) {
-          logs.push('RUNWAY_API_KEY bulunamadı. Runway video üretimi için simülasyon moduna geçiliyor.');
-          videoProviderUsed = 'simulation';
-        } else {
-          logs.push('Runway API anahtarı doğrulandı. Runway Gen-2 video üretimi simüle ediliyor.');
-          videoProviderUsed = 'simulation';
-        }
-      } else if (videoProvider === 'sora') {
-        const openAiKey = aiSettings.openAiKey || process.env.OPENAI_API_KEY;
-        if (!openAiKey) {
-          logs.push('OPENAI_API_KEY bulunamadı. Sora video üretimi için simülasyon moduna geçiliyor.');
-          videoProviderUsed = 'simulation';
-        } else {
-          logs.push('OpenAI API anahtarı doğrulandı. Sora video üretimi simüle ediliyor.');
-          videoProviderUsed = 'simulation';
-        }
-      }
-
-      if (videoProviderUsed === 'simulation' || !videoUrl) {
-        // Return a beautiful free MP4 video link from Mixkit
-        const keywords = prompt.toLowerCase();
-        if (keywords.includes('doğa') || keywords.includes('meriç') || keywords.includes('nehir')) {
-          videoUrl = 'https://assets.mixkit.co/videos/preview/mixkit-countryside-meadow-with-river-in-middle-41712-large.mp4';
-        } else if (keywords.includes('tarih') || keywords.includes('cami') || keywords.includes('selimiye')) {
-          videoUrl = 'https://assets.mixkit.co/videos/preview/mixkit-historical-building-under-a-clear-blue-sky-42861-large.mp4';
-        } else {
-          videoUrl = 'https://assets.mixkit.co/videos/preview/mixkit-aerial-view-of-a-harbor-city-and-sea-41617-large.mp4';
-        }
-        logs.push('Simüle edilmiş Mixkit videosu atandı.');
-      }
+      videoUrl = 'https://assets.mixkit.co/videos/preview/mixkit-historical-building-under-a-clear-blue-sky-42861-large.mp4';
+      videoProviderUsed = 'simulation';
+      logs.push('Video üretimi simüle edildi.');
     }
 
     const savedImageUrl = imageUrl ? this.saveBase64Media(imageUrl, 'social-image') : imageUrl;
@@ -795,8 +892,9 @@ Do not add any other stylistic rules, presets, or constraints. Return ONLY a val
       textProviderUsed,
       imageProviderUsed,
       videoProviderUsed,
+      textGenerationError,
       imageGenerationError,
-      isSimulated: textProviderUsed === 'simulation' && imageProviderUsed === 'simulation' && videoProviderUsed === 'simulation',
+      isSimulated: textProviderUsed === 'simulation' && imageProviderUsed === 'simulation',
       logs
     };
   }
@@ -982,25 +1080,20 @@ Do not add any other stylistic rules, presets, or constraints. Return ONLY a val
   async regenerateImage(
     imagePrompt: string,
     feedback?: string,
-    imageProvider: string = 'huggingface',
+    imageProvider?: string,
     imageModel?: string,
   ) {
     const aiSettings = await this.getAiSettings();
-    let activeImageProvider = imageProvider;
-    let activeImageModel = imageModel || aiSettings.defaultImageModel || 'flux';
-
-    // Find custom configs if any
-    let customImageConfig: any = null;
-    if (aiSettings.customModels && Array.isArray(aiSettings.customModels)) {
-      customImageConfig = (aiSettings.customModels as any[]).find(
-        (m: any) => String(m.id) === String(activeImageProvider) || m.name === activeImageProvider
-      );
-    }
+    const activeImageProvider = imageProvider || aiSettings.defaultImageProvider || 'huggingface';
+    const activeImageModel = imageModel || aiSettings.defaultImageModel || 'flux';
+    const fallbackImageProvider = aiSettings.fallbackImageProvider;
+    const fallbackImageModel = aiSettings.fallbackImageModel;
 
     const logs: string[] = [];
     let finalPrompt = imagePrompt;
-    let imageProviderUsed = customImageConfig ? customImageConfig.name : activeImageProvider;
+    let imageProviderUsed = activeImageProvider;
     let imageUrl = '';
+    let imageError: string | undefined;
 
     if (feedback && feedback.trim()) {
       const geminiKey = aiSettings.geminiKey || process.env.GEMINI_API_KEY;
@@ -1040,7 +1133,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
           } else {
             logs.push('Gemini ile prompt güncelleme başarısız oldu, orijinal prompt kullanılacak.');
           }
-        } catch (error) {
+        } catch (error: any) {
           logs.push(`Prompt güncelleme sırasında hata: ${error.message}`);
         }
       } else {
@@ -1048,366 +1141,57 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
       }
     }
 
-    if (customImageConfig) {
-      const customKey = customImageConfig.apiKey;
-      const customUrl = customImageConfig.apiUrl.replace(/\/$/, '');
-      const modelName = customImageConfig.selectedModel || activeImageModel;
+    try {
+      logs.push(`Görsel ana model (${activeImageProvider} - ${activeImageModel}) ile yeniden üretiliyor...`);
+      const res = await this.executeSingleImageProvider(
+        activeImageProvider,
+        activeImageModel,
+        finalPrompt,
+        finalPrompt,
+        '',
+        aiSettings,
+        logs
+      );
+      imageUrl = res.imageUrl;
+      imageProviderUsed = res.providerUsed;
+      logs.push(`Görsel ana model (${imageProviderUsed}) ile başarıyla üretildi.`);
+    } catch (err1: any) {
+      this.logger.warn(`Ana görsel modeli (${activeImageProvider}) başarısız oldu: ${err1.message}`);
+      logs.push(`Ana görsel modeli (${activeImageProvider}) hatası: ${err1.message}`);
+      this.checkAiTokenError(err1, `Görsel Yeniden Üretim (${activeImageProvider})`);
 
-      try {
-        logs.push(`Özel API (${customImageConfig.name}) ile görsel yeniden üretiliyor... model: ${modelName}`);
-        const response = await fetch(`${customUrl}/v1/images/generations`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${customKey}`
-          },
-          body: JSON.stringify({
-            model: modelName,
-            prompt: finalPrompt,
-            n: 1,
-            size: '1024x1024'
-          })
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          imageUrl = data.data?.[0]?.url || data.data?.[0]?.b64_json || '';
-          if (imageUrl && !imageUrl.startsWith('data:') && !imageUrl.startsWith('http')) {
-            imageUrl = `data:image/png;base64,${imageUrl}`;
-          }
-          logs.push(`Görsel özel model (${customImageConfig.name} - ${modelName}) ile başarıyla yeniden üretildi.`);
-        } else {
-          const errText = await response.text();
-          throw new Error(`Özel model API hatası: ${response.statusText} - ${errText}`);
-        }
-      } catch (error) {
-        this.checkAiTokenError(error, `Özel Görsel Modeli (${customImageConfig.name})`);
-        logs.push(`Özel model görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
-        imageProviderUsed = 'simulation';
-      }
-    } else if (activeImageProvider === 'dalle') {
-      const openAiKey = aiSettings.openAiKey || process.env.OPENAI_API_KEY;
-      const openAiUrl = (aiSettings.openAiUrl || 'https://api.openai.com').replace(/\/$/, '');
-      if (!openAiKey) {
-        logs.push('OPENAI_API_KEY bulunamadı. DALL-E görsel üretimi için simülasyon moduna geçiliyor.');
-        imageProviderUsed = 'simulation';
-      } else {
+      let fallbackSuccess = false;
+      if (fallbackImageProvider && (fallbackImageProvider !== activeImageProvider || fallbackImageModel !== activeImageModel)) {
         try {
-          const response = await fetch(`${openAiUrl}/v1/images/generations`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${openAiKey}`
-            },
-            body: JSON.stringify({
-              model: activeImageModel || 'dall-e-3',
-              prompt: finalPrompt,
-              n: 1,
-              size: '1024x1024'
-            })
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            imageUrl = data.data?.[0]?.url || '';
-            logs.push(`Görsel OpenAI DALL-E (${activeImageModel || 'dall-e-3'}) ile başarıyla yeniden üretildi.`);
-          } else {
-            const errText = await response.text();
-            throw new Error(`DALL-E hatası: ${response.statusText} - ${errText}`);
-          }
-        } catch (error) {
-          this.checkAiTokenError(error, 'OpenAI DALL-E 3 (Yeniden Görsel)');
-          logs.push(`DALL-E görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
-          imageProviderUsed = 'simulation';
-        }
-      }
-    } else if (activeImageProvider === 'stability') {
-      const stabilityKey = aiSettings.stabilityKey || process.env.STABILITY_API_KEY;
-      if (!stabilityKey) {
-        logs.push('STABILITY_API_KEY bulunamadı. Stability AI görsel üretimi için simülasyon moduna geçiliyor.');
-        imageProviderUsed = 'simulation';
-      } else {
-        try {
-          const response = await fetch(
-            'https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image',
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Accept: 'application/json',
-                Authorization: `Bearer ${stabilityKey}`
-              },
-              body: JSON.stringify({
-                text_prompts: [{ text: finalPrompt }],
-                cfg_scale: 7,
-                height: 1024,
-                width: 1024,
-                samples: 1,
-                steps: 30
-              })
-            }
+          logs.push(`Yedek görsel modeline (${fallbackImageProvider} - ${fallbackImageModel}) geçiliyor...`);
+          const res = await this.executeSingleImageProvider(
+            fallbackImageProvider,
+            fallbackImageModel,
+            finalPrompt,
+            finalPrompt,
+            '',
+            aiSettings,
+            logs
           );
-
-          if (response.ok) {
-            const data = await response.json();
-            const base64 = data.artifacts?.[0]?.base64;
-            if (base64) {
-              imageUrl = `data:image/png;base64,${base64}`;
-              logs.push('Görsel Stability AI ile başarıyla yeniden üretildi.');
-            }
-          } else {
-            const errText = await response.text();
-            throw new Error(`Stability AI hatası: ${response.statusText} - ${errText}`);
-          }
-        } catch (error) {
-          this.checkAiTokenError(error, 'Stability AI (Yeniden Görsel)');
-          logs.push(`Stability AI görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
-          imageProviderUsed = 'simulation';
+          imageUrl = res.imageUrl;
+          imageProviderUsed = `${res.providerUsed} (Yedek Model)`;
+          logs.push(`Görsel yedek model (${imageProviderUsed}) ile başarıyla üretildi.`);
+          fallbackSuccess = true;
+        } catch (err2: any) {
+          this.logger.warn(`Yedek görsel modeli (${fallbackImageProvider}) da başarısız oldu: ${err2.message}`);
+          logs.push(`Yedek görsel modeli (${fallbackImageProvider}) hatası: ${err2.message}`);
+          imageError = `Ana Model (${activeImageProvider}): ${err1.message} | Yedek Model (${fallbackImageProvider}): ${err2.message}`;
         }
-      }
-    } else if (activeImageProvider === 'gemini') {
-      const geminiKey = aiSettings.geminiKey || process.env.GEMINI_API_KEY;
-      const geminiUrl = (aiSettings.geminiUrl || 'https://generativelanguage.googleapis.com').replace(/\/$/, '');
-      if (!geminiKey) {
-        logs.push('GEMINI_API_KEY bulunamadı. Gemini görsel üretimi için simülasyon moduna geçiliyor.');
-        imageProviderUsed = 'simulation';
       } else {
-        try {
-          let modelName = activeImageModel;
-          if (!modelName || !modelName.startsWith('imagen-') || modelName.startsWith('imagen-3.')) {
-            modelName = 'imagen-4.0-generate-001';
-          }
-          logs.push(`Google Gemini (${modelName}) ile görsel yeniden üretiliyor...`);
-          const response = await fetch(
-            `${geminiUrl}/v1beta/models/${modelName}:predict?key=${geminiKey}`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                instances: [{ prompt: finalPrompt }],
-                parameters: { sampleCount: 1, aspectRatio: '1:1' }
-              })
-            }
-          );
-
-          if (response.ok) {
-            const data = await response.json();
-            const base64 = data.predictions?.[0]?.bytesBase64Encoded;
-            if (base64) {
-              imageUrl = `data:image/png;base64,${base64}`;
-              logs.push(`Görsel Google Gemini Imagen (${modelName}) ile başarıyla yeniden üretildi.`);
-            } else {
-              throw new Error('Görsel verisi (bytesBase64Encoded) yanıttan alınamadı.');
-            }
-          } else {
-            const errText = await response.text();
-            throw new Error(`Gemini Imagen hatası: ${response.statusText} - ${errText}`);
-          }
-        } catch (error) {
-          this.checkAiTokenError(error, 'Google Gemini Imagen (Yeniden Görsel)');
-          logs.push(`Gemini Imagen görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
-          imageProviderUsed = 'simulation';
-        }
+        imageError = `Ana Model (${activeImageProvider}): ${err1.message}`;
       }
-    } else if (activeImageProvider === 'huggingface') {
-      const hfKey = aiSettings.huggingFaceKey || process.env.HUGGINGFACE_API_KEY;
-      if (!hfKey) {
-        logs.push('HUGGINGFACE_API_KEY bulunamadı. Hugging Face görsel üretimi için simülasyon moduna geçiliyor.');
+
+      if (!fallbackSuccess) {
+        const ts = Date.now();
+        imageUrl = `https://images.unsplash.com/photo-1564507592333-c60657eea523?auto=format&fit=crop&w=800&q=80&sig=${ts}`;
         imageProviderUsed = 'simulation';
-      } else {
-        try {
-          const modelPath = activeImageModel || 'black-forest-labs/FLUX.1-schnell';
-          logs.push(`Hugging Face (${modelPath}) ile görsel yeniden üretiliyor...`);
-          imageUrl = await this.generateHuggingFaceImage(modelPath, finalPrompt, hfKey);
-          logs.push(`Görsel Hugging Face (${modelPath}) ile başarıyla yeniden üretildi.`);
-        } catch (error) {
-          this.checkAiTokenError(error, 'Hugging Face FLUX (Yeniden Görsel)');
-          logs.push(`Hugging Face görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
-          imageProviderUsed = 'simulation';
-        }
+        logs.push('Simüle edilmiş Unsplash görseli atandı.');
       }
-    } else if (activeImageProvider === 'grok') {
-      const grokKey = aiSettings.grokKey || process.env.GROK_API_KEY || process.env.XAI_API_KEY;
-      const grokUrl = (aiSettings.grokUrl || 'https://api.x.ai').replace(/\/$/, '');
-      if (!grokKey) {
-        logs.push('GROK_API_KEY bulunamadı. Grok görsel üretimi için simülasyon moduna geçiliyor.');
-        imageProviderUsed = 'simulation';
-      } else {
-        try {
-          const modelName = activeImageModel || 'grok-imagine-image-quality';
-          logs.push(`xAI Grok (${modelName}) ile görsel yeniden üretiliyor...`);
-          const response = await fetch(`${grokUrl}/v1/images/generations`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${grokKey}`
-            },
-            body: JSON.stringify({
-              model: modelName,
-              prompt: finalPrompt,
-              n: 1,
-              size: '1024x1024'
-            })
-          });
-
-          if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`Grok hatası: ${response.statusText} - ${errText}`);
-          }
-
-          const data = await response.json();
-          imageUrl = data.data?.[0]?.url || data.data?.[0]?.b64_json || '';
-          if (imageUrl && !imageUrl.startsWith('data:') && !imageUrl.startsWith('http')) {
-            imageUrl = `data:image/png;base64,${imageUrl}`;
-          }
-          logs.push(`Görsel xAI Grok (${modelName}) ile başarıyla yeniden üretildi.`);
-        } catch (error) {
-          this.checkAiTokenError(error, 'xAI Grok (Yeniden Görsel)');
-          logs.push(`Grok görsel yeniden üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
-          imageProviderUsed = 'simulation';
-        }
-      }
-    } else if (activeImageProvider === 'groq') {
-      const groqKey = aiSettings.groqKey || process.env.GROQ_API_KEY;
-      const groqUrl = (aiSettings.groqUrl || 'https://api.groq.com').replace(/\/$/, '');
-      if (!groqKey) {
-        logs.push('GROQ_API_KEY bulunamadı. Groq görsel üretimi için simülasyon moduna geçiliyor.');
-        imageProviderUsed = 'simulation';
-      } else {
-        if (groqUrl !== 'https://api.groq.com' && groqUrl !== 'https://api.groq.com/openai') {
-          try {
-            const modelName = activeImageModel || 'llama-3.3-70b-specdec';
-            logs.push(`Özel Groq Endpoint (${groqUrl}) ile görsel yeniden üretiliyor...`);
-            const response = await fetch(`${groqUrl}/v1/images/generations`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${groqKey}`
-              },
-              body: JSON.stringify({
-                model: modelName,
-                prompt: finalPrompt,
-                n: 1,
-                size: '1024x1024'
-              })
-            });
-
-            if (!response.ok) {
-              const errText = await response.text();
-              throw new Error(`Groq Özel Endpoint hatası: ${response.statusText} - ${errText}`);
-            }
-
-            const data = await response.json();
-            imageUrl = data.data?.[0]?.url || data.data?.[0]?.b64_json || '';
-            if (imageUrl && !imageUrl.startsWith('data:') && !imageUrl.startsWith('http')) {
-              imageUrl = `data:image/png;base64,${imageUrl}`;
-            }
-            logs.push(`Görsel Özel Groq Endpoint ile başarıyla yeniden üretildi.`);
-          } catch (error) {
-            logs.push(`Özel Groq Endpoint hatası: ${error.message}. Prompt zenginleştirme moduna geçiliyor.`);
-          }
-        }
-
-        if (!imageUrl) {
-          try {
-            const hfKey = aiSettings.huggingFaceKey || process.env.HUGGINGFACE_API_KEY;
-            if (!hfKey) {
-              throw new Error('Hugging Face key bulunamadı. Groq görsel üretimi için Hugging Face gereklidir.');
-            }
-
-            logs.push('Groq LLM ile görsel promptu zenginleştiriliyor...');
-            const response = await fetch(`${groqUrl}/v1/chat/completions`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${groqKey}`
-              },
-              body: JSON.stringify({
-                model: 'llama-3.3-70b-versatile',
-                messages: [
-                  {
-                    role: 'user',
-                    content: `You are an expert prompt engineer. Expand the following image description into a highly detailed English prompt for Stable Diffusion/Flux. Make it artistic, specifying details about style, lighting, composition, and mood. Avoid adding humans or text. Prompt: ${finalPrompt}`
-                  }
-                ]
-              })
-            });
-
-            let enhancedPrompt = finalPrompt;
-            if (response.ok) {
-              const data = await response.json();
-              const text = data.choices?.[0]?.message?.content;
-              if (text && text.trim()) {
-                enhancedPrompt = text.trim();
-                logs.push(`Prompt Groq ile başarıyla zenginleştirildi.`);
-              }
-            } else {
-              logs.push('Groq prompt zenginleştirme başarısız oldu, orijinal prompt kullanılacak.');
-            }
-
-            const modelPath = activeImageModel || 'black-forest-labs/FLUX.1-schnell';
-            logs.push(`Zenginleştirilmiş prompt Hugging Face (${modelPath}) modeline gönderiliyor...`);
-            imageUrl = await this.generateHuggingFaceImage(modelPath, enhancedPrompt, hfKey);
-            logs.push(`Görsel Groq + Hugging Face (${modelPath}) ile başarıyla yeniden üretildi.`);
-          } catch (error) {
-            this.checkAiTokenError(error, 'Groq / Hugging Face FLUX (Yeniden Görsel)');
-            logs.push(`Groq görsel yeniden üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
-            imageProviderUsed = 'simulation';
-          }
-        }
-      }
-    } else if (activeImageProvider === 'fal') {
-      const falKey = aiSettings.falKey || process.env.FAL_KEY || process.env.FAL_API_KEY;
-      const falUrl = (aiSettings.falUrl || 'https://fal.run').replace(/\/$/, '');
-      if (!falKey) {
-        logs.push('FAL_KEY bulunamadı. fal.ai görsel üretimi için simülasyon moduna geçiliyor.');
-        imageProviderUsed = 'simulation';
-      } else {
-        try {
-          let modelName = activeImageModel || 'fal-ai/flux/schnell';
-          if (modelName === 'flux' || modelName === 'flux-schnell') {
-            modelName = 'fal-ai/flux/schnell';
-          } else if (modelName === 'flux-dev') {
-            modelName = 'fal-ai/flux/dev';
-          } else if (modelName === 'flux-pro') {
-            modelName = 'fal-ai/flux/pro';
-          }
-          logs.push(`fal.ai (${modelName}) ile görsel yeniden üretiliyor...`);
-          const response = await fetch(`${falUrl}/${modelName}`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Key ${falKey}`
-            },
-            body: JSON.stringify({
-              prompt: finalPrompt,
-              image_size: 'square_hd'
-            })
-          });
-
-          if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`fal.ai hatası: ${response.statusText} - ${errText}`);
-          }
-
-          const data = await response.json();
-          imageUrl = data.images?.[0]?.url || '';
-          if (imageUrl && !imageUrl.startsWith('data:') && !imageUrl.startsWith('http')) {
-            imageUrl = `data:image/png;base64,${imageUrl}`;
-          }
-          logs.push(`Görsel fal.ai (${modelName}) ile başarıyla yeniden üretildi.`);
-        } catch (error) {
-          this.checkAiTokenError(error, 'fal.ai (Yeniden Görsel)');
-          logs.push(`fal.ai görsel yeniden üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
-          imageProviderUsed = 'simulation';
-        }
-      }
-    }
-
-    if (imageProviderUsed === 'simulation' || !imageUrl) {
-      const ts = Date.now();
-      imageUrl = `https://images.unsplash.com/photo-1564507592333-c60657eea523?auto=format&fit=crop&w=800&q=80&sig=${ts}`;
-      logs.push('Simüle edilmiş Unsplash görseli atandı.');
     }
 
     const savedImageUrl = imageUrl ? this.saveBase64Media(imageUrl, 'social-image') : imageUrl;
@@ -1416,6 +1200,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
       imageUrl: savedImageUrl,
       imagePrompt: finalPrompt,
       imageProviderUsed,
+      error: imageError,
       logs,
     };
   }
@@ -2225,6 +2010,17 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
       throw new Error('Kampanya bulunamadı.');
     }
 
+    // Verify static image on disk if set
+    let validCampaignImage = false;
+    if (campaign.imageUrl) {
+      const cleanPath = campaign.imageUrl.startsWith('/') ? campaign.imageUrl.substring(1) : campaign.imageUrl;
+      const fullPath = path.join(process.cwd(), cleanPath);
+      validCampaignImage = fs.existsSync(fullPath);
+      if (!validCampaignImage) {
+        this.logger.warn(`Kampanyaya ait sabit görsel diskte bulunamadı (${campaign.imageUrl}). Yapay zeka ile yeni görsel üretilecek.`);
+      }
+    }
+
     // Load default providers and models from global settings
     const aiSettings = await this.getAiSettings();
     const textProvider = aiSettings.defaultTextProvider || 'gemini';
@@ -2240,12 +2036,29 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
       textProvider,
       imageProvider,
       'simulation',
-      campaign.imageUrl ? false : true, // Do not generate AI image if static image is set
+      validCampaignImage ? false : true, // Only skip AI image if a valid static image exists on disk
       false, // Include video
       campaign.postType,
       textModel,
       imageModel
     );
+
+    // Build comprehensive error message if models failed
+    const cleanErrStr = (err: string) => {
+      if (!err) return '';
+      return err.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim().substring(0, 300);
+    };
+
+    const errorList: string[] = [];
+    if (genResult.textProviderUsed === 'simulation') {
+      const msg = cleanErrStr(genResult.textGenerationError) || 'API anahtarı veya servis yanıt vermedi. Simülasyon metni kullanıldı.';
+      errorList.push(`[Metin]: ${msg}`);
+    }
+    if (genResult.imageProviderUsed === 'simulation' && !validCampaignImage) {
+      const msg = cleanErrStr(genResult.imageGenerationError) || 'Yapay zeka görseli üretilemedi (API kotası, anahtar hatası veya model kapalı). Stok görsel atandı.';
+      errorList.push(`[Görsel]: ${msg}`);
+    }
+    const finalErrorMessage = errorList.length > 0 ? errorList.join(' | ') : null;
 
     // Create the post database record with status PENDING_APPROVAL
     const newPost = await this.prisma.socialMediaPost.create({
@@ -2253,15 +2066,13 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         platform: campaign.platform,
         prompt: campaign.prompt,
         caption: genResult.caption,
-        imageUrl: campaign.imageUrl || genResult.imageUrl || null,
+        imageUrl: (validCampaignImage ? campaign.imageUrl : null) || genResult.imageUrl || null,
         videoUrl: null,
         postType: campaign.postType,
         status: 'PENDING_APPROVAL',
         campaignId: campaign.id,
         accountId: campaign.accountId,
-        errorMessage: (genResult.imageProviderUsed === 'simulation' && !campaign.imageUrl)
-          ? `Yapay zeka görseli üretilemedi (${genResult.imageGenerationError || 'Bilinmeyen hata'}). Hazır/stok görsel atandı.`
-          : null,
+        errorMessage: finalErrorMessage,
       },
     });
 
@@ -2271,18 +2082,23 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
     }
 
     let warningText = '';
-    if (genResult.imageProviderUsed === 'simulation' && !campaign.imageUrl) {
-      warningText = `\n⚠️ <b>YAPAY ZEKA GÖRSELİ ÜRETİLEMEDİ!</b>\n` +
-        `• <b>Durum:</b> Hazır/Stok görsel atandı.\n` +
-        `• <b>Hata Nedeni:</b> <code>${genResult.imageGenerationError || 'Bilinmeyen hata / API Limiti'}</code>\n`;
+    if (finalErrorMessage) {
+      const shortWarning = finalErrorMessage.length > 300 ? finalErrorMessage.substring(0, 300) + '...' : finalErrorMessage;
+      warningText = `\n⚠️ <b>YAPAY ZEKA MODEL UYARISI:</b>\n<code>${this.escapeTelegramHtml(shortWarning)}</code>\n`;
     }
 
+    const safeTitle = this.escapeTelegramHtml(campaign.title);
+    const safePlatform = this.escapeTelegramHtml(campaign.platform);
+    const safePostType = this.escapeTelegramHtml(campaign.postType);
+    const safePrompt = this.escapeTelegramHtml(campaign.prompt);
+    const safeCaption = this.escapeTelegramHtml(newPost.caption);
+
     const campaignMsg = `🔔 <b>ZAMANLANMIŞ GÖREV TEST ÇALIŞTIRMASI (ONAY BEKLİYOR)</b>\n\n` +
-      `<b>Kampanya:</b> ${campaign.title}\n` +
-      `<b>Platform:</b> ${campaign.platform}\n` +
-      `<b>Tür:</b> ${campaign.postType}\n` +
-      `<b>Konu/Talimat:</b> <i>"${campaign.prompt}"</i>\n\n` +
-      `<b>Metin:</b>\n<i>${newPost.caption}</i>\n` +
+      `<b>Kampanya:</b> ${safeTitle}\n` +
+      `<b>Platform:</b> ${safePlatform}\n` +
+      `<b>Tür:</b> ${safePostType}\n` +
+      `<b>Konu/Talimat:</b> <i>"${safePrompt}"</i>\n\n` +
+      `<b>Metin:</b>\n<i>${safeCaption}</i>\n` +
       mediaLink +
       warningText;
 
@@ -2381,6 +2197,14 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
           data: { lastRunAt: now },
         });
 
+        // Verify static image on disk if set
+        let validCampaignImage = false;
+        if (campaign.imageUrl) {
+          const cleanPath = campaign.imageUrl.startsWith('/') ? campaign.imageUrl.substring(1) : campaign.imageUrl;
+          const fullPath = path.join(process.cwd(), cleanPath);
+          validCampaignImage = fs.existsSync(fullPath);
+        }
+
         // Load default providers and models from global settings
         const aiSettings = await this.getAiSettings();
         const textProvider = aiSettings.defaultTextProvider || 'gemini';
@@ -2397,12 +2221,29 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
           textProvider,
           imageProvider,
           'simulation',
-          campaign.imageUrl ? false : true, // Do not generate AI image if static image is set
+          validCampaignImage ? false : true,
           false, // Include video
           campaign.postType,
           textModel,
           imageModel
         );
+
+        // Build comprehensive error message if models failed
+        const cleanErrStr = (err: string) => {
+          if (!err) return '';
+          return err.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim().substring(0, 300);
+        };
+
+        const errorList: string[] = [];
+        if (genResult.textProviderUsed === 'simulation') {
+          const msg = cleanErrStr(genResult.textGenerationError) || 'API anahtarı veya servis yanıt vermedi. Simülasyon metni kullanıldı.';
+          errorList.push(`[Metin]: ${msg}`);
+        }
+        if (genResult.imageProviderUsed === 'simulation' && !validCampaignImage) {
+          const msg = cleanErrStr(genResult.imageGenerationError) || 'Yapay zeka görseli üretilemedi (API kotası, anahtar hatası veya model kapalı). Stok görsel atandı.';
+          errorList.push(`[Görsel]: ${msg}`);
+        }
+        const finalErrorMessage = errorList.length > 0 ? errorList.join(' | ') : null;
 
         // Create the post database record with status PENDING_APPROVAL
         const newPost = await this.prisma.socialMediaPost.create({
@@ -2410,15 +2251,13 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
             platform: campaign.platform,
             prompt: campaign.prompt,
             caption: genResult.caption,
-            imageUrl: campaign.imageUrl || genResult.imageUrl || null,
+            imageUrl: (validCampaignImage ? campaign.imageUrl : null) || genResult.imageUrl || null,
             videoUrl: null,
             postType: campaign.postType,
             status: 'PENDING_APPROVAL',
             campaignId: campaign.id,
             accountId: campaign.accountId,
-            errorMessage: (genResult.imageProviderUsed === 'simulation' && !campaign.imageUrl)
-              ? `Yapay zeka görseli üretilemedi (${genResult.imageGenerationError || 'Bilinmeyen hata'}). Hazır/stok görsel atandı.`
-              : null,
+            errorMessage: finalErrorMessage,
           },
         });
 
@@ -2430,10 +2269,9 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         }
 
         let warningText = '';
-        if (genResult.imageProviderUsed === 'simulation' && !campaign.imageUrl) {
-          warningText = `\n⚠️ <b>YAPAY ZEKA GÖRSELİ ÜRETİLEMEDİ!</b>\n` +
-            `• <b>Durum:</b> Hazır/Stok görsel atandı.\n` +
-            `• <b>Hata Nedeni:</b> <code>${genResult.imageGenerationError || 'Bilinmeyen hata / API Limiti'}</code>\n`;
+        if (finalErrorMessage) {
+          const shortWarning = finalErrorMessage.length > 300 ? finalErrorMessage.substring(0, 300) + '...' : finalErrorMessage;
+          warningText = `\n⚠️ <b>YAPAY ZEKA MODEL UYARISI:</b>\n<code>${this.escapeTelegramHtml(shortWarning)}</code>\n`;
         }
 
         const safeTitle = this.escapeTelegramHtml(campaign.title);
@@ -2554,13 +2392,19 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         if (!setting.botToken || !setting.chatId) continue;
         const url = `https://api.telegram.org/bot${setting.botToken}/sendMessage`;
         
+        const MAX_TG_LEN = 3800;
+        let textToSend = message;
+        if (textToSend.length > MAX_TG_LEN) {
+          textToSend = textToSend.substring(0, MAX_TG_LEN) + '\n\n...(mesaj sınırı nedeniyle kısaltıldı)';
+        }
+
         // Primary attempt: HTML parse_mode
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             chat_id: setting.chatId,
-            text: message,
+            text: textToSend,
             parse_mode: 'HTML',
             ...(replyMarkup && { reply_markup: replyMarkup }),
           }),
@@ -2571,9 +2415,12 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
           this.logger.warn(`Telegram HTML notification error for setting #${setting.id} (${setting.name}): ${errText}. Attempting plain text fallback...`);
           
           // Fallback attempt: Plain text (strip basic HTML tags) to guarantee delivery even if HTML parsing fails
-          const plainText = message
+          let plainText = message
             .replace(/<br\s*\/?>/gi, '\n')
             .replace(/<\/?[^>]+(>|$)/g, '');
+          if (plainText.length > MAX_TG_LEN) {
+            plainText = plainText.substring(0, MAX_TG_LEN) + '\n\n...(mesaj sınırı nedeniyle kısaltıldı)';
+          }
 
           const fallbackResponse = await fetch(url, {
             method: 'POST',
@@ -2591,6 +2438,8 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
           } else {
             this.logger.log(`Telegram plain text fallback sent successfully for setting #${setting.id} (${setting.name}).`);
           }
+        } else {
+          this.logger.log(`Telegram bildirim mesajı başarıyla gönderildi: #${setting.id} (${setting.name}).`);
         }
       }
     } catch (err) {
@@ -2822,50 +2671,63 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
     const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 seconds timeout
     
     try {
-      const response = await fetch(
+      const endpoints = [
+        `https://router.huggingface.co/hf-inference/models/${resolvedModel}`,
         `https://api-inference.huggingface.co/models/${resolvedModel}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${hfKey}`,
-          },
-          body: JSON.stringify({ inputs: prompt }),
-          signal: controller.signal,
-        },
-      );
+      ];
+
+      let response: Response | null = null;
+      let lastErrText = '';
+
+      for (const endpoint of endpoints) {
+        try {
+          response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${hfKey}`,
+            },
+            body: JSON.stringify({ inputs: prompt }),
+            signal: controller.signal,
+          });
+          if (response.ok) break;
+          lastErrText = await response.text();
+          // If 410 Gone, router tells model is deprecated, break to report
+          if (response.status === 410) break;
+        } catch (fetchErr: any) {
+          lastErrText = fetchErr.message;
+        }
+      }
+
       clearTimeout(timeoutId);
 
-      if (!response.ok) {
-        let errDetails = '';
+      if (!response || !response.ok) {
+        let errDetails = lastErrText;
         try {
-          const errJson = await response.json();
+          const errJson = JSON.parse(lastErrText);
           if (errJson && errJson.error) {
-            errDetails = errJson.error;
-          } else {
-            errDetails = JSON.stringify(errJson);
+            errDetails = typeof errJson.error === 'string' ? errJson.error : JSON.stringify(errJson.error);
           }
         } catch {
-          try {
-            errDetails = await response.text();
-          } catch {
-            errDetails = response.statusText;
-          }
+          errDetails = lastErrText.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim();
+        }
+        if (errDetails.length > 200) {
+          errDetails = errDetails.substring(0, 200) + '...';
         }
 
-        let friendlyMessage = `Hugging Face hatası: ${response.status} ${response.statusText}`;
-        if (response.status === 401) {
-          friendlyMessage = `Hugging Face Yetkilendirme Hatası (401): Lütfen geçerli bir API Token girdiğinizden emin olun. Detay: ${errDetails}`;
-        } else if (response.status === 403) {
-          friendlyMessage = `Hugging Face Erişim Reddedildi (403): Token izinleri veya model erişim yetkiniz eksik olabilir. Detay: ${errDetails}`;
-        } else if (response.status === 404) {
-          friendlyMessage = `Hugging Face Model Bulunamadı (404): "${resolvedModel}" isimli model mevcut değil veya yüklenemedi.`;
-        } else if (response.status === 429) {
-          friendlyMessage = `Hugging Face Kota/Limit Aşımı (429): İstek limitiniz doldu veya çok fazla istek yapıldı. Detay: ${errDetails}`;
-        } else if (response.status === 503) {
-          friendlyMessage = `Hugging Face Servis Dışı (503): Model Hugging Face sunucularına şu an yükleniyor olabilir. Lütfen 1-2 dakika sonra tekrar deneyin. Detay: ${errDetails}`;
-        } else if (errDetails) {
-          friendlyMessage = `Hugging Face API Hatası: ${errDetails}`;
+        let friendlyMessage = `Hugging Face hatası: ${response?.status || 'Bağlantı'} - ${errDetails}`;
+        if (response?.status === 410) {
+          friendlyMessage = `Hugging Face (410): "${resolvedModel}" modeli Hugging Face sunucusunda artık desteklenmiyor veya deprecated edilmiş. Lütfen model ayarlarından farklı bir görsel modeli seçin.`;
+        } else if (response?.status === 401) {
+          friendlyMessage = `Hugging Face Yetkilendirme Hatası (401): Lütfen geçerli bir Hugging Face API Token girdiğinizden emin olun.`;
+        } else if (response?.status === 403) {
+          friendlyMessage = `Hugging Face Erişim Reddedildi (403): Token izinleri veya model lisans kabulü eksik. Detay: ${errDetails}`;
+        } else if (response?.status === 404) {
+          friendlyMessage = `Hugging Face Model Bulunamadı (404): "${resolvedModel}" isimli model mevcut değil.`;
+        } else if (response?.status === 429) {
+          friendlyMessage = `Hugging Face Kota/Limit Aşımı (429): Çok fazla istek yapıldı veya kota doldu.`;
+        } else if (response?.status === 503) {
+          friendlyMessage = `Hugging Face Servis Dışı (503): Model Hugging Face sunucularına şu an yükleniyor. Lütfen 1-2 dakika sonra tekrar deneyin.`;
         }
         
         throw new Error(friendlyMessage);
@@ -2877,18 +2739,17 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
     } catch (error: any) {
       clearTimeout(timeoutId);
       
-      // If it's a network-level fetch error, extract detail
       if (error.name === 'TypeError' && error.message === 'fetch failed') {
         const cause = error.cause;
         let networkDetails = 'Bilinmeyen ağ hatası';
         if (cause) {
           networkDetails = `${cause.code || cause.name || ''} - ${cause.message || ''}`;
         }
-        throw new Error(`Hugging Face sunucusuna bağlantı başarısız (Fetch Failed). İnternet bağlantısı veya DNS hatası olabilir. Detay: ${networkDetails}`);
+        throw new Error(`Hugging Face sunucusuna bağlantı başarısız (DNS/Fetch Failed): ${networkDetails}`);
       }
       
       if (error.name === 'AbortError') {
-        throw new Error(`Hugging Face istek zaman aşımı (60 saniye). Model yanıt vermedi veya çok yavaş.`);
+        throw new Error(`Hugging Face istek zaman aşımı (60 saniye). Model yanıt vermedi.`);
       }
 
       throw error;
