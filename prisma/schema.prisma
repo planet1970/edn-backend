@@ -685,19 +685,36 @@ model TelegramSetting {
 }
 
 model AiModelSetting {
-  id                   String   @id @default("GLOBAL")
-  geminiKey            String?
-  openAiKey            String?
-  claudeKey            String?
-  stabilityKey         String?
-  huggingFaceKey       String?
-  geminiUrl            String?  @default("https://generativelanguage.googleapis.com")
-  openAiUrl            String?  @default("https://api.openai.com")
-  claudeUrl            String?  @default("https://api.anthropic.com")
-  defaultTextProvider  String   @default("gemini")
-  defaultTextModel     String   @default("gemini-2.5-flash")
-  defaultImageProvider String   @default("huggingface")
-  defaultImageModel    String   @default("flux")
-  customModels         Json     @default("[]")
-  updatedAt            DateTime @updatedAt
+  id                    String   @id @default("GLOBAL")
+  geminiKey             String?
+  openAiKey             String?
+  claudeKey             String?
+  stabilityKey          String?
+  huggingFaceKey        String?
+  groqKey               String?
+  groqUrl               String?  @default("https://api.groq.com")
+  grokKey               String?
+  grokUrl               String?  @default("https://api.x.ai")
+  falKey                String?
+  falUrl                String?  @default("https://fal.run")
+  nvidiaKey             String?
+  nvidiaUrl             String?  @default("https://integrate.api.nvidia.com/v1")
+  geminiUrl             String?  @default("https://generativelanguage.googleapis.com")
+  openAiUrl             String?  @default("https://api.openai.com")
+  claudeUrl             String?  @default("https://api.anthropic.com")
+  defaultTextProvider   String   @default("gemini")
+  defaultTextModel      String   @default("gemini-2.5-flash")
+  fallbackTextProvider  String?  @default("openai")
+  fallbackTextModel     String?  @default("gpt-4o-mini")
+  defaultImageProvider  String   @default("huggingface")
+  defaultImageModel     String   @default("flux")
+  fallbackImageProvider String?  @default("gemini")
+  fallbackImageModel    String?  @default("imagen-4.0-generate-001")
+  defaultVideoProvider  String?  @default("fal")
+  defaultVideoModel     String?  @default("fal-ai/minimax/video-01")
+  fallbackVideoProvider String?  @default("simulation")
+  fallbackVideoModel    String?  @default("simulation")
+  customModels          Json     @default("[]")
+  huggingFaceModels     Json     @default("[]")
+  updatedAt             DateTime @updatedAt
 }

@@ -473,8 +473,8 @@ Do not add any other stylistic rules, presets, or constraints. Return ONLY a val
         } else {
           try {
             let modelName = activeImageModel;
-            if (!modelName || !modelName.startsWith('imagen-')) {
-              modelName = 'imagen-3.0-generate-002';
+            if (!modelName || !modelName.startsWith('imagen-') || modelName.startsWith('imagen-3.')) {
+              modelName = 'imagen-4.0-generate-001';
             }
             logs.push(`Google Gemini (${modelName}) ile görsel üretiliyor...`);
             const response = await fetch(
@@ -527,37 +527,196 @@ Do not add any other stylistic rules, presets, or constraints. Return ONLY a val
             const uniquePrompt = `${finalImagePrompt.trim()} [Variation: ${Math.random().toString(36).substring(7)}]`;
 
             const modelPath = activeImageModel || 'black-forest-labs/FLUX.1-schnell';
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 saniye zaman aşımı (Nginx 504'e düşmemek için)
-            
-            const response = await fetch(
-              `https://api-inference.huggingface.co/models/${modelPath}`,
-              {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  Authorization: `Bearer ${hfKey}`,
-                },
-                body: JSON.stringify({ inputs: uniquePrompt }),
-                signal: controller.signal,
-              },
-            );
-            clearTimeout(timeoutId);
-
-            if (!response.ok) {
-              const errText = await response.text();
-              throw new Error(`Hugging Face hatası: ${response.statusText} - ${errText}`);
-            }
-
-            const buffer = await response.arrayBuffer();
-            const base64 = Buffer.from(buffer).toString('base64');
-            imageUrl = `data:image/jpeg;base64,${base64}`;
-            logs.push('Görsel Hugging Face (Stable Diffusion XL) ile başarıyla üretildi.');
+            logs.push(`Hugging Face (${modelPath}) ile görsel üretiliyor...`);
+            imageUrl = await this.generateHuggingFaceImage(modelPath, uniquePrompt, hfKey);
+            logs.push(`Görsel Hugging Face (${modelPath}) ile başarıyla üretildi.`);
           } catch (error) {
             this.checkAiTokenError(error, 'Hugging Face FLUX (Görsel)');
             logs.push(`Hugging Face görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
             imageProviderUsed = 'simulation';
             imageGenerationError = `Hugging Face hatası: ${error.message}`;
+          }
+        }
+      } else if (activeImageProvider === 'grok') {
+        const grokKey = aiSettings.grokKey || process.env.GROK_API_KEY || process.env.XAI_API_KEY;
+        const grokUrl = (aiSettings.grokUrl || 'https://api.x.ai').replace(/\/$/, '');
+        if (!grokKey) {
+          logs.push('GROK_API_KEY bulunamadı. Grok görsel üretimi için simülasyon moduna geçiliyor.');
+          imageProviderUsed = 'simulation';
+          imageGenerationError = 'GROK_API_KEY bulunamadı.';
+        } else {
+          try {
+            const modelName = activeImageModel || 'grok-imagine-image-quality';
+            logs.push(`xAI Grok (${modelName}) ile görsel üretiliyor...`);
+            const response = await fetch(`${grokUrl}/v1/images/generations`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${grokKey}`
+              },
+              body: JSON.stringify({
+                model: modelName,
+                prompt: imagePrompt || prompt,
+                n: 1,
+                size: '1024x1024'
+              })
+            });
+
+            if (!response.ok) {
+              const errText = await response.text();
+              throw new Error(`Grok hatası: ${response.statusText} - ${errText}`);
+            }
+
+            const data = await response.json();
+            imageUrl = data.data?.[0]?.url || data.data?.[0]?.b64_json || '';
+            if (imageUrl && !imageUrl.startsWith('data:') && !imageUrl.startsWith('http')) {
+              imageUrl = `data:image/png;base64,${imageUrl}`;
+            }
+            logs.push(`Görsel xAI Grok (${modelName}) ile başarıyla üretildi.`);
+          } catch (error) {
+            this.checkAiTokenError(error, 'xAI Grok (Görsel)');
+            logs.push(`Grok görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
+            imageProviderUsed = 'simulation';
+            imageGenerationError = `Grok hatası: ${error.message}`;
+          }
+        }
+      } else if (activeImageProvider === 'groq') {
+        const groqKey = aiSettings.groqKey || process.env.GROQ_API_KEY;
+        const groqUrl = (aiSettings.groqUrl || 'https://api.groq.com').replace(/\/$/, '');
+        if (!groqKey) {
+          logs.push('GROQ_API_KEY bulunamadı. Groq görsel üretimi için simülasyon moduna geçiliyor.');
+          imageProviderUsed = 'simulation';
+          imageGenerationError = 'GROQ_API_KEY bulunamadı.';
+        } else {
+          if (groqUrl !== 'https://api.groq.com' && groqUrl !== 'https://api.groq.com/openai') {
+            try {
+              const modelName = activeImageModel || 'llama-3.3-70b-specdec';
+              logs.push(`Özel Groq Endpoint (${groqUrl}) ile görsel üretiliyor...`);
+              const response = await fetch(`${groqUrl}/v1/images/generations`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${groqKey}`
+                },
+                body: JSON.stringify({
+                  model: modelName,
+                  prompt: imagePrompt || prompt,
+                  n: 1,
+                  size: '1024x1024'
+                })
+              });
+
+              if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`Groq Özel Endpoint hatası: ${response.statusText} - ${errText}`);
+              }
+
+              const data = await response.json();
+              imageUrl = data.data?.[0]?.url || data.data?.[0]?.b64_json || '';
+              if (imageUrl && !imageUrl.startsWith('data:') && !imageUrl.startsWith('http')) {
+                imageUrl = `data:image/png;base64,${imageUrl}`;
+              }
+              logs.push(`Görsel Özel Groq Endpoint ile başarıyla üretildi.`);
+            } catch (error) {
+              logs.push(`Özel Groq Endpoint hatası: ${error.message}. Prompt zenginleştirme moduna geçiliyor.`);
+            }
+          }
+
+          if (!imageUrl) {
+            try {
+              const hfKey = aiSettings.huggingFaceKey || process.env.HUGGINGFACE_API_KEY;
+              if (!hfKey) {
+                throw new Error('Hugging Face key bulunamadı. Groq görsel üretimi için Hugging Face gereklidir.');
+              }
+
+              logs.push('Groq LLM ile görsel promptu zenginleştiriliyor...');
+              const response = await fetch(`${groqUrl}/v1/chat/completions`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${groqKey}`
+                },
+                body: JSON.stringify({
+                  model: 'llama-3.3-70b-versatile',
+                  messages: [
+                    {
+                      role: 'user',
+                      content: `You are an expert prompt engineer. Expand the following image description into a highly detailed English prompt for Stable Diffusion/Flux. Make it artistic, specifying details about style, lighting, composition, and mood. Avoid adding humans or text. Prompt: ${imagePrompt || prompt}`
+                    }
+                  ]
+                })
+              });
+
+              let enhancedPrompt = imagePrompt || prompt;
+              if (response.ok) {
+                const data = await response.json();
+                const text = data.choices?.[0]?.message?.content;
+                if (text && text.trim()) {
+                  enhancedPrompt = text.trim();
+                  logs.push(`Prompt Groq ile başarıyla zenginleştirildi.`);
+                }
+              } else {
+                logs.push('Groq prompt zenginleştirme başarısız oldu, orijinal prompt kullanılacak.');
+              }
+
+              const modelPath = activeImageModel || 'black-forest-labs/FLUX.1-schnell';
+              logs.push(`Zenginleştirilmiş prompt Hugging Face (${modelPath}) modeline gönderiliyor...`);
+              imageUrl = await this.generateHuggingFaceImage(modelPath, enhancedPrompt, hfKey);
+              logs.push(`Görsel Groq + Hugging Face (${modelPath}) ile başarıyla üretildi.`);
+            } catch (error) {
+              this.checkAiTokenError(error, 'Groq / Hugging Face FLUX (Görsel)');
+              logs.push(`Groq görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
+              imageProviderUsed = 'simulation';
+              imageGenerationError = `Groq/FLUX hatası: ${error.message}`;
+            }
+          }
+        }
+      } else if (activeImageProvider === 'fal') {
+        const falKey = aiSettings.falKey || process.env.FAL_KEY || process.env.FAL_API_KEY;
+        const falUrl = (aiSettings.falUrl || 'https://fal.run').replace(/\/$/, '');
+        if (!falKey) {
+          logs.push('FAL_KEY bulunamadı. fal.ai görsel üretimi için simülasyon moduna geçiliyor.');
+          imageProviderUsed = 'simulation';
+          imageGenerationError = 'FAL_KEY bulunamadı.';
+        } else {
+          try {
+            let modelName = activeImageModel || 'fal-ai/flux/schnell';
+            if (modelName === 'flux' || modelName === 'flux-schnell') {
+              modelName = 'fal-ai/flux/schnell';
+            } else if (modelName === 'flux-dev') {
+              modelName = 'fal-ai/flux/dev';
+            } else if (modelName === 'flux-pro') {
+              modelName = 'fal-ai/flux/pro';
+            }
+            logs.push(`fal.ai (${modelName}) ile görsel üretiliyor...`);
+            const response = await fetch(`${falUrl}/${modelName}`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Key ${falKey}`
+              },
+              body: JSON.stringify({
+                prompt: imagePrompt || prompt,
+                image_size: 'square_hd'
+              })
+            });
+
+            if (!response.ok) {
+              const errText = await response.text();
+              throw new Error(`fal.ai hatası: ${response.statusText} - ${errText}`);
+            }
+
+            const data = await response.json();
+            imageUrl = data.images?.[0]?.url || '';
+            if (imageUrl && !imageUrl.startsWith('data:') && !imageUrl.startsWith('http')) {
+              imageUrl = `data:image/png;base64,${imageUrl}`;
+            }
+            logs.push(`Görsel fal.ai (${modelName}) ile başarıyla üretildi.`);
+          } catch (error) {
+            this.checkAiTokenError(error, 'fal.ai (Görsel)');
+            logs.push(`fal.ai görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
+            imageProviderUsed = 'simulation';
+            imageGenerationError = `fal.ai hatası: ${error.message}`;
           }
         }
       }
@@ -1015,8 +1174,8 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
       } else {
         try {
           let modelName = activeImageModel;
-          if (!modelName || !modelName.startsWith('imagen-')) {
-            modelName = 'imagen-3.0-generate-002';
+          if (!modelName || !modelName.startsWith('imagen-') || modelName.startsWith('imagen-3.')) {
+            modelName = 'imagen-4.0-generate-001';
           }
           logs.push(`Google Gemini (${modelName}) ile görsel yeniden üretiliyor...`);
           const response = await fetch(
@@ -1058,30 +1217,188 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
       } else {
         try {
           const modelPath = activeImageModel || 'black-forest-labs/FLUX.1-schnell';
-          const response = await fetch(
-            `https://router.huggingface.co/hf-inference/models/${modelPath}`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${hfKey}`,
-              },
-              body: JSON.stringify({ inputs: finalPrompt }),
-            },
-          );
-
-          if (response.ok) {
-            const buffer = await response.arrayBuffer();
-            const base64 = Buffer.from(buffer).toString('base64');
-            imageUrl = `data:image/jpeg;base64,${base64}`;
-            logs.push(`Görsel Hugging Face (${modelPath}) ile başarıyla yeniden üretildi.`);
-          } else {
-            const errText = await response.text();
-            throw new Error(`Hugging Face hatası: ${response.statusText} - ${errText}`);
-          }
+          logs.push(`Hugging Face (${modelPath}) ile görsel yeniden üretiliyor...`);
+          imageUrl = await this.generateHuggingFaceImage(modelPath, finalPrompt, hfKey);
+          logs.push(`Görsel Hugging Face (${modelPath}) ile başarıyla yeniden üretildi.`);
         } catch (error) {
           this.checkAiTokenError(error, 'Hugging Face FLUX (Yeniden Görsel)');
           logs.push(`Hugging Face görsel üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
+          imageProviderUsed = 'simulation';
+        }
+      }
+    } else if (activeImageProvider === 'grok') {
+      const grokKey = aiSettings.grokKey || process.env.GROK_API_KEY || process.env.XAI_API_KEY;
+      const grokUrl = (aiSettings.grokUrl || 'https://api.x.ai').replace(/\/$/, '');
+      if (!grokKey) {
+        logs.push('GROK_API_KEY bulunamadı. Grok görsel üretimi için simülasyon moduna geçiliyor.');
+        imageProviderUsed = 'simulation';
+      } else {
+        try {
+          const modelName = activeImageModel || 'grok-imagine-image-quality';
+          logs.push(`xAI Grok (${modelName}) ile görsel yeniden üretiliyor...`);
+          const response = await fetch(`${grokUrl}/v1/images/generations`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${grokKey}`
+            },
+            body: JSON.stringify({
+              model: modelName,
+              prompt: finalPrompt,
+              n: 1,
+              size: '1024x1024'
+            })
+          });
+
+          if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`Grok hatası: ${response.statusText} - ${errText}`);
+          }
+
+          const data = await response.json();
+          imageUrl = data.data?.[0]?.url || data.data?.[0]?.b64_json || '';
+          if (imageUrl && !imageUrl.startsWith('data:') && !imageUrl.startsWith('http')) {
+            imageUrl = `data:image/png;base64,${imageUrl}`;
+          }
+          logs.push(`Görsel xAI Grok (${modelName}) ile başarıyla yeniden üretildi.`);
+        } catch (error) {
+          this.checkAiTokenError(error, 'xAI Grok (Yeniden Görsel)');
+          logs.push(`Grok görsel yeniden üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
+          imageProviderUsed = 'simulation';
+        }
+      }
+    } else if (activeImageProvider === 'groq') {
+      const groqKey = aiSettings.groqKey || process.env.GROQ_API_KEY;
+      const groqUrl = (aiSettings.groqUrl || 'https://api.groq.com').replace(/\/$/, '');
+      if (!groqKey) {
+        logs.push('GROQ_API_KEY bulunamadı. Groq görsel üretimi için simülasyon moduna geçiliyor.');
+        imageProviderUsed = 'simulation';
+      } else {
+        if (groqUrl !== 'https://api.groq.com' && groqUrl !== 'https://api.groq.com/openai') {
+          try {
+            const modelName = activeImageModel || 'llama-3.3-70b-specdec';
+            logs.push(`Özel Groq Endpoint (${groqUrl}) ile görsel yeniden üretiliyor...`);
+            const response = await fetch(`${groqUrl}/v1/images/generations`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${groqKey}`
+              },
+              body: JSON.stringify({
+                model: modelName,
+                prompt: finalPrompt,
+                n: 1,
+                size: '1024x1024'
+              })
+            });
+
+            if (!response.ok) {
+              const errText = await response.text();
+              throw new Error(`Groq Özel Endpoint hatası: ${response.statusText} - ${errText}`);
+            }
+
+            const data = await response.json();
+            imageUrl = data.data?.[0]?.url || data.data?.[0]?.b64_json || '';
+            if (imageUrl && !imageUrl.startsWith('data:') && !imageUrl.startsWith('http')) {
+              imageUrl = `data:image/png;base64,${imageUrl}`;
+            }
+            logs.push(`Görsel Özel Groq Endpoint ile başarıyla yeniden üretildi.`);
+          } catch (error) {
+            logs.push(`Özel Groq Endpoint hatası: ${error.message}. Prompt zenginleştirme moduna geçiliyor.`);
+          }
+        }
+
+        if (!imageUrl) {
+          try {
+            const hfKey = aiSettings.huggingFaceKey || process.env.HUGGINGFACE_API_KEY;
+            if (!hfKey) {
+              throw new Error('Hugging Face key bulunamadı. Groq görsel üretimi için Hugging Face gereklidir.');
+            }
+
+            logs.push('Groq LLM ile görsel promptu zenginleştiriliyor...');
+            const response = await fetch(`${groqUrl}/v1/chat/completions`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${groqKey}`
+              },
+              body: JSON.stringify({
+                model: 'llama-3.3-70b-versatile',
+                messages: [
+                  {
+                    role: 'user',
+                    content: `You are an expert prompt engineer. Expand the following image description into a highly detailed English prompt for Stable Diffusion/Flux. Make it artistic, specifying details about style, lighting, composition, and mood. Avoid adding humans or text. Prompt: ${finalPrompt}`
+                  }
+                ]
+              })
+            });
+
+            let enhancedPrompt = finalPrompt;
+            if (response.ok) {
+              const data = await response.json();
+              const text = data.choices?.[0]?.message?.content;
+              if (text && text.trim()) {
+                enhancedPrompt = text.trim();
+                logs.push(`Prompt Groq ile başarıyla zenginleştirildi.`);
+              }
+            } else {
+              logs.push('Groq prompt zenginleştirme başarısız oldu, orijinal prompt kullanılacak.');
+            }
+
+            const modelPath = activeImageModel || 'black-forest-labs/FLUX.1-schnell';
+            logs.push(`Zenginleştirilmiş prompt Hugging Face (${modelPath}) modeline gönderiliyor...`);
+            imageUrl = await this.generateHuggingFaceImage(modelPath, enhancedPrompt, hfKey);
+            logs.push(`Görsel Groq + Hugging Face (${modelPath}) ile başarıyla yeniden üretildi.`);
+          } catch (error) {
+            this.checkAiTokenError(error, 'Groq / Hugging Face FLUX (Yeniden Görsel)');
+            logs.push(`Groq görsel yeniden üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
+            imageProviderUsed = 'simulation';
+          }
+        }
+      }
+    } else if (activeImageProvider === 'fal') {
+      const falKey = aiSettings.falKey || process.env.FAL_KEY || process.env.FAL_API_KEY;
+      const falUrl = (aiSettings.falUrl || 'https://fal.run').replace(/\/$/, '');
+      if (!falKey) {
+        logs.push('FAL_KEY bulunamadı. fal.ai görsel üretimi için simülasyon moduna geçiliyor.');
+        imageProviderUsed = 'simulation';
+      } else {
+        try {
+          let modelName = activeImageModel || 'fal-ai/flux/schnell';
+          if (modelName === 'flux' || modelName === 'flux-schnell') {
+            modelName = 'fal-ai/flux/schnell';
+          } else if (modelName === 'flux-dev') {
+            modelName = 'fal-ai/flux/dev';
+          } else if (modelName === 'flux-pro') {
+            modelName = 'fal-ai/flux/pro';
+          }
+          logs.push(`fal.ai (${modelName}) ile görsel yeniden üretiliyor...`);
+          const response = await fetch(`${falUrl}/${modelName}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Key ${falKey}`
+            },
+            body: JSON.stringify({
+              prompt: finalPrompt,
+              image_size: 'square_hd'
+            })
+          });
+
+          if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`fal.ai hatası: ${response.statusText} - ${errText}`);
+          }
+
+          const data = await response.json();
+          imageUrl = data.images?.[0]?.url || '';
+          if (imageUrl && !imageUrl.startsWith('data:') && !imageUrl.startsWith('http')) {
+            imageUrl = `data:image/png;base64,${imageUrl}`;
+          }
+          logs.push(`Görsel fal.ai (${modelName}) ile başarıyla yeniden üretildi.`);
+        } catch (error) {
+          this.checkAiTokenError(error, 'fal.ai (Yeniden Görsel)');
+          logs.push(`fal.ai görsel yeniden üretim hatası: ${error.message}. Simülasyona geçiliyor.`);
           imageProviderUsed = 'simulation';
         }
       }
@@ -2119,12 +2436,16 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
             `• <b>Hata Nedeni:</b> <code>${genResult.imageGenerationError || 'Bilinmeyen hata / API Limiti'}</code>\n`;
         }
 
+        const safeTitle = this.escapeTelegramHtml(campaign.title);
+        const safePrompt = this.escapeTelegramHtml(campaign.prompt);
+        const safeCaption = this.escapeTelegramHtml(newPost.caption);
+
         const campaignMsg = `🔔 <b>ZAMANLANMIŞ GÖREV (ONAY BEKLİYOR)</b>\n\n` +
-          `<b>Kampanya:</b> ${campaign.title}\n` +
+          `<b>Kampanya:</b> ${safeTitle}\n` +
           `<b>Platform:</b> ${campaign.platform}\n` +
           `<b>Tür:</b> ${campaign.postType}\n` +
-          `<b>Konu/Talimat:</b> <i>"${campaign.prompt}"</i>\n\n` +
-          `<b>Metin:</b>\n<i>${newPost.caption}</i>\n` +
+          `<b>Konu/Talimat:</b> <i>"${safePrompt}"</i>\n\n` +
+          `<b>Metin:</b>\n<i>${safeCaption}</i>\n` +
           mediaLink +
           warningText;
 
@@ -2151,9 +2472,9 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
           this.logger.error(`Kampanya (#${campaign.id}) lastRunAt geri alma hatası:`, dbError);
         }
         const errMsg = `❌ <b>KAMPANYA YÜRÜTÜLÜRKEN HATA OLUŞTU</b>\n\n` +
-          `<b>Kampanya:</b> ${campaign.title} (#${campaign.id})\n` +
+          `<b>Kampanya:</b> ${this.escapeTelegramHtml(campaign.title)} (#${campaign.id})\n` +
           `<b>Platform:</b> ${campaign.platform}\n` +
-          `<b>Hata Nedeni:</b> <code>${error.message}</code>`;
+          `<b>Hata Nedeni:</b> <code>${this.escapeTelegramHtml(error.message)}</code>`;
         await this.sendTelegramNotification(errMsg, null, campaign.telegramId);
       }
     }
@@ -2196,6 +2517,14 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
     });
   }
 
+  public escapeTelegramHtml(text?: string): string {
+    if (!text) return '';
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
   async sendTelegramNotification(message: string, replyMarkup?: any, specificTelegramId?: number | null) {
     try {
       let settings: any[] = [];
@@ -2205,16 +2534,27 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         });
         if (single && single.isActive) {
           settings = [single];
+        } else {
+          this.logger.warn(`Telegram setting #${specificTelegramId} not found or inactive. Falling back to active settings.`);
         }
-      } else {
+      }
+      
+      if (settings.length === 0) {
         settings = await this.prisma.telegramSetting.findMany({
           where: { isActive: true }
         });
       }
 
+      if (settings.length === 0) {
+        this.logger.warn('No active Telegram settings found to send notification.');
+        return;
+      }
+
       for (const setting of settings) {
         if (!setting.botToken || !setting.chatId) continue;
         const url = `https://api.telegram.org/bot${setting.botToken}/sendMessage`;
+        
+        // Primary attempt: HTML parse_mode
         const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2228,7 +2568,29 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
 
         if (!response.ok) {
           const errText = await response.text();
-          this.logger.error(`Telegram notification error for setting #${setting.id} (${setting.name}): ${errText}`);
+          this.logger.warn(`Telegram HTML notification error for setting #${setting.id} (${setting.name}): ${errText}. Attempting plain text fallback...`);
+          
+          // Fallback attempt: Plain text (strip basic HTML tags) to guarantee delivery even if HTML parsing fails
+          const plainText = message
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<\/?[^>]+(>|$)/g, '');
+
+          const fallbackResponse = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: setting.chatId,
+              text: plainText,
+              ...(replyMarkup && { reply_markup: replyMarkup }),
+            }),
+          });
+
+          if (!fallbackResponse.ok) {
+            const fallbackErrText = await fallbackResponse.text();
+            this.logger.error(`Telegram plain text notification error for setting #${setting.id} (${setting.name}): ${fallbackErrText}`);
+          } else {
+            this.logger.log(`Telegram plain text fallback sent successfully for setting #${setting.id} (${setting.name}).`);
+          }
         }
       }
     } catch (err) {
@@ -2444,6 +2806,95 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
     }
   }
 
+  private async generateHuggingFaceImage(modelPath: string, prompt: string, hfKey: string): Promise<string> {
+    // Map common model aliases to actual Hugging Face model IDs
+    let resolvedModel = modelPath;
+    const modelLower = modelPath.toLowerCase();
+    if (modelLower === 'flux' || modelLower === 'flux-schnell' || modelLower === 'flux.1-schnell') {
+      resolvedModel = 'black-forest-labs/FLUX.1-schnell';
+    } else if (modelLower === 'flux-dev' || modelLower === 'flux.1-dev') {
+      resolvedModel = 'black-forest-labs/FLUX.1-dev';
+    } else if (modelLower === 'sdxl' || modelLower === 'stable-diffusion-xl') {
+      resolvedModel = 'stabilityai/stable-diffusion-xl-base-1.0';
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 seconds timeout
+    
+    try {
+      const response = await fetch(
+        `https://api-inference.huggingface.co/models/${resolvedModel}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${hfKey}`,
+          },
+          body: JSON.stringify({ inputs: prompt }),
+          signal: controller.signal,
+        },
+      );
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        let errDetails = '';
+        try {
+          const errJson = await response.json();
+          if (errJson && errJson.error) {
+            errDetails = errJson.error;
+          } else {
+            errDetails = JSON.stringify(errJson);
+          }
+        } catch {
+          try {
+            errDetails = await response.text();
+          } catch {
+            errDetails = response.statusText;
+          }
+        }
+
+        let friendlyMessage = `Hugging Face hatası: ${response.status} ${response.statusText}`;
+        if (response.status === 401) {
+          friendlyMessage = `Hugging Face Yetkilendirme Hatası (401): Lütfen geçerli bir API Token girdiğinizden emin olun. Detay: ${errDetails}`;
+        } else if (response.status === 403) {
+          friendlyMessage = `Hugging Face Erişim Reddedildi (403): Token izinleri veya model erişim yetkiniz eksik olabilir. Detay: ${errDetails}`;
+        } else if (response.status === 404) {
+          friendlyMessage = `Hugging Face Model Bulunamadı (404): "${resolvedModel}" isimli model mevcut değil veya yüklenemedi.`;
+        } else if (response.status === 429) {
+          friendlyMessage = `Hugging Face Kota/Limit Aşımı (429): İstek limitiniz doldu veya çok fazla istek yapıldı. Detay: ${errDetails}`;
+        } else if (response.status === 503) {
+          friendlyMessage = `Hugging Face Servis Dışı (503): Model Hugging Face sunucularına şu an yükleniyor olabilir. Lütfen 1-2 dakika sonra tekrar deneyin. Detay: ${errDetails}`;
+        } else if (errDetails) {
+          friendlyMessage = `Hugging Face API Hatası: ${errDetails}`;
+        }
+        
+        throw new Error(friendlyMessage);
+      }
+
+      const buffer = await response.arrayBuffer();
+      const base64 = Buffer.from(buffer).toString('base64');
+      return `data:image/jpeg;base64,${base64}`;
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      
+      // If it's a network-level fetch error, extract detail
+      if (error.name === 'TypeError' && error.message === 'fetch failed') {
+        const cause = error.cause;
+        let networkDetails = 'Bilinmeyen ağ hatası';
+        if (cause) {
+          networkDetails = `${cause.code || cause.name || ''} - ${cause.message || ''}`;
+        }
+        throw new Error(`Hugging Face sunucusuna bağlantı başarısız (Fetch Failed). İnternet bağlantısı veya DNS hatası olabilir. Detay: ${networkDetails}`);
+      }
+      
+      if (error.name === 'AbortError') {
+        throw new Error(`Hugging Face istek zaman aşımı (60 saniye). Model yanıt vermedi veya çok yavaş.`);
+      }
+
+      throw error;
+    }
+  }
+
   async getAiSettings() {
     let settings = await this.prisma.aiModelSetting.findUnique({
       where: { id: 'GLOBAL' },
@@ -2451,6 +2902,20 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
     if (!settings) {
       settings = await this.prisma.aiModelSetting.create({
         data: { id: 'GLOBAL' },
+      });
+    }
+    const defaultModels = [
+      'black-forest-labs/FLUX.1-schnell',
+      'black-forest-labs/FLUX.1-dev',
+      'stabilityai/stable-diffusion-xl-base-1.0',
+      'stabilityai/stable-diffusion-3-medium-diffusers',
+      'playgroundai/playground-v2.5-1024px-aesthetic',
+    ];
+
+    if (!settings.huggingFaceModels || (Array.isArray(settings.huggingFaceModels) && settings.huggingFaceModels.length === 0)) {
+      settings = await this.prisma.aiModelSetting.update({
+        where: { id: 'GLOBAL' },
+        data: { huggingFaceModels: defaultModels },
       });
     }
     return settings;
@@ -2468,11 +2933,28 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         claudeUrl: data.claudeUrl,
         stabilityKey: data.stabilityKey,
         huggingFaceKey: data.huggingFaceKey,
+        groqKey: data.groqKey,
+        groqUrl: data.groqUrl,
+        grokKey: data.grokKey,
+        grokUrl: data.grokUrl,
+        falKey: data.falKey,
+        falUrl: data.falUrl,
+        nvidiaKey: data.nvidiaKey,
+        nvidiaUrl: data.nvidiaUrl,
         defaultTextProvider: data.defaultTextProvider,
         defaultTextModel: data.defaultTextModel,
+        fallbackTextProvider: data.fallbackTextProvider,
+        fallbackTextModel: data.fallbackTextModel,
         defaultImageProvider: data.defaultImageProvider,
         defaultImageModel: data.defaultImageModel,
+        fallbackImageProvider: data.fallbackImageProvider,
+        fallbackImageModel: data.fallbackImageModel,
+        defaultVideoProvider: data.defaultVideoProvider,
+        defaultVideoModel: data.defaultVideoModel,
+        fallbackVideoProvider: data.fallbackVideoProvider,
+        fallbackVideoModel: data.fallbackVideoModel,
         customModels: data.customModels || [],
+        huggingFaceModels: data.huggingFaceModels || [],
       },
       create: {
         id: 'GLOBAL',
@@ -2484,11 +2966,28 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         claudeUrl: data.claudeUrl,
         stabilityKey: data.stabilityKey,
         huggingFaceKey: data.huggingFaceKey,
+        groqKey: data.groqKey,
+        groqUrl: data.groqUrl || 'https://api.groq.com',
+        grokKey: data.grokKey,
+        grokUrl: data.grokUrl || 'https://api.x.ai',
+        falKey: data.falKey,
+        falUrl: data.falUrl || 'https://fal.run',
+        nvidiaKey: data.nvidiaKey,
+        nvidiaUrl: data.nvidiaUrl || 'https://integrate.api.nvidia.com/v1',
         defaultTextProvider: data.defaultTextProvider || 'gemini',
         defaultTextModel: data.defaultTextModel || 'gemini-2.5-flash',
+        fallbackTextProvider: data.fallbackTextProvider || 'openai',
+        fallbackTextModel: data.fallbackTextModel || 'gpt-4o-mini',
         defaultImageProvider: data.defaultImageProvider || 'huggingface',
         defaultImageModel: data.defaultImageModel || 'flux',
+        fallbackImageProvider: data.fallbackImageProvider || 'gemini',
+        fallbackImageModel: data.fallbackImageModel || 'imagen-4.0-generate-001',
+        defaultVideoProvider: data.defaultVideoProvider || 'fal',
+        defaultVideoModel: data.defaultVideoModel || 'fal-ai/minimax/video-01',
+        fallbackVideoProvider: data.fallbackVideoProvider || 'simulation',
+        fallbackVideoModel: data.fallbackVideoModel || 'simulation',
         customModels: data.customModels || [],
+        huggingFaceModels: data.huggingFaceModels || [],
       },
     });
   }
@@ -2509,10 +3008,17 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         const data = await response.json();
         if (data && Array.isArray(data.models)) {
           const list = data.models.map((m: any) => m.name.replace('models/', ''));
-          list.push('imagen-3.0-generate-002');
-          return list;
+          // Filter out deprecated imagen-3 models if any returned
+          const filtered = list.filter((m: string) => !m.startsWith('imagen-3'));
+          if (!filtered.includes('imagen-4.0-generate-001')) {
+            filtered.push('imagen-4.0-generate-001');
+          }
+          if (!filtered.includes('imagen-4.0-fast-generate-001')) {
+            filtered.push('imagen-4.0-fast-generate-001');
+          }
+          return filtered;
         }
-        return ['imagen-3.0-generate-002'];
+        return ['imagen-4.0-generate-001', 'imagen-4.0-fast-generate-001'];
       } else {
         const headers: any = {};
         if (provider === 'claude') {
@@ -2522,7 +3028,8 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
           headers['Authorization'] = `Bearer ${apiKey}`;
         }
         
-        const response = await fetch(`${cleanUrl}/v1/models`, {
+        const fetchUrl = cleanUrl.endsWith('/v1') ? `${cleanUrl}/models` : `${cleanUrl}/v1/models`;
+        const response = await fetch(fetchUrl, {
           headers,
         });
         
