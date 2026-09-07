@@ -2680,15 +2680,15 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
   }
 
   private async generateHuggingFaceImage(modelPath: string, prompt: string, hfKey: string): Promise<string> {
-    // Map common model aliases to actual Hugging Face model IDs
+    // Map common model aliases and deprecated models to active working Hugging Face model IDs
     let resolvedModel = modelPath;
     const modelLower = modelPath.toLowerCase();
     if (modelLower === 'flux' || modelLower === 'flux-schnell' || modelLower === 'flux.1-schnell') {
       resolvedModel = 'black-forest-labs/FLUX.1-schnell';
     } else if (modelLower === 'flux-dev' || modelLower === 'flux.1-dev') {
       resolvedModel = 'black-forest-labs/FLUX.1-dev';
-    } else if (modelLower === 'sdxl' || modelLower === 'stable-diffusion-xl') {
-      resolvedModel = 'stabilityai/stable-diffusion-xl-base-1.0';
+    } else if (modelLower === 'sdxl' || modelLower === 'stable-diffusion-xl' || modelLower.includes('stable-diffusion-xl-base-1.0') || modelLower.includes('stable-diffusion-3-medium')) {
+      resolvedModel = 'black-forest-labs/FLUX.1-schnell';
     }
 
     const controller = new AbortController();
@@ -2792,12 +2792,13 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
     const defaultModels = [
       'black-forest-labs/FLUX.1-schnell',
       'black-forest-labs/FLUX.1-dev',
-      'stabilityai/stable-diffusion-xl-base-1.0',
-      'stabilityai/stable-diffusion-3-medium-diffusers',
+      'runwayml/stable-diffusion-v1-5',
       'playgroundai/playground-v2.5-1024px-aesthetic',
     ];
 
-    if (!settings.huggingFaceModels || (Array.isArray(settings.huggingFaceModels) && settings.huggingFaceModels.length === 0)) {
+    const hasDeprecated = Array.isArray(settings.huggingFaceModels) && (settings.huggingFaceModels as string[]).some(m => m.includes('stable-diffusion-xl-base-1.0') || m.includes('stable-diffusion-3-medium'));
+
+    if (!settings.huggingFaceModels || (Array.isArray(settings.huggingFaceModels) && settings.huggingFaceModels.length === 0) || hasDeprecated) {
       settings = await this.prisma.aiModelSetting.update({
         where: { id: 'GLOBAL' },
         data: { huggingFaceModels: defaultModels },
