@@ -85,6 +85,27 @@ export class SocialMediaService implements OnModuleInit {
     if (url.startsWith('http')) return url;
     const baseUrl = (process.env.BACKEND_URL || 'https://api.edirnego.com').replace(/\/$/, '');
     const cleanUrl = url.startsWith('/') ? url : `/${url}`;
+    return `${baseUrl}${cleanUrl}`;
+  }
+
+  private async fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 12000): Promise<Response> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const customOptions = { ...options };
+      if (!customOptions.signal) {
+        customOptions.signal = controller.signal;
+      }
+      const response = await fetch(url, customOptions);
+      return response;
+    } catch (error: any) {
+      if (error.name === 'AbortError' || error.message?.includes('aborted')) {
+        throw new Error(`AI isteği zaman aşımına uğradı (${Math.round(timeoutMs / 1000)} sn).`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   // 1. Generate post content using specified AI APIs (or simulated)
@@ -161,7 +182,7 @@ export class SocialMediaService implements OnModuleInit {
         if (useJsonMode) {
           body.response_format = { type: 'json_object' };
         }
-        return await fetch(fetchUrl, {
+        return await this.fetchWithTimeout(fetchUrl, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -170,7 +191,7 @@ export class SocialMediaService implements OnModuleInit {
             'X-Title': 'EDN Sosyal Medya',
           },
           body: JSON.stringify(body),
-        });
+        }, 10000);
       };
 
       let response = await callApi(true);
@@ -218,7 +239,7 @@ export class SocialMediaService implements OnModuleInit {
       }
       const modelName = model || 'gemini-2.5-flash';
       logs.push(`Google Gemini (${modelName}) ile metin üretiliyor...`);
-      const response = await fetch(
+      const response = await this.fetchWithTimeout(
         `${cleanUrl}/v1beta/models/${modelName}:generateContent?key=${geminiKey}`,
         {
           method: 'POST',
@@ -230,7 +251,8 @@ export class SocialMediaService implements OnModuleInit {
             systemInstruction: { parts: [{ text: systemInstruction }] },
             generationConfig: { responseMimeType: 'application/json', temperature: 0.7 }
           })
-        }
+        },
+        10000
       );
       if (!response.ok) {
         const err = await response.text();
@@ -258,7 +280,7 @@ export class SocialMediaService implements OnModuleInit {
       }
       const modelName = model || 'gpt-4o-mini';
       logs.push(`OpenAI (${modelName}) ile metin üretiliyor...`);
-      const response = await fetch(`${cleanUrl}/v1/chat/completions`, {
+      const response = await this.fetchWithTimeout(`${cleanUrl}/v1/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -273,7 +295,7 @@ export class SocialMediaService implements OnModuleInit {
           ],
           temperature: 0.7,
         }),
-      });
+      }, 10000);
       if (!response.ok) {
         const err = await response.text();
         throw new Error(`OpenAI Hatası [${response.status}]: ${err}`);
@@ -300,7 +322,7 @@ export class SocialMediaService implements OnModuleInit {
       }
       const modelName = model || 'claude-3-5-sonnet-20241022';
       logs.push(`Anthropic Claude (${modelName}) ile metin üretiliyor...`);
-      const response = await fetch(`${cleanUrl}/v1/messages`, {
+      const response = await this.fetchWithTimeout(`${cleanUrl}/v1/messages`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -315,7 +337,7 @@ export class SocialMediaService implements OnModuleInit {
             { role: 'user', content: `Konu/Prompt: "${prompt}"\nPlatform: ${platform}\nSes Tonu: ${tone}\n\nİçeriği oluştur:` }
           ]
         })
-      });
+      }, 10000);
       if (!response.ok) {
         const err = await response.text();
         throw new Error(`Claude Hatası [${response.status}]: ${err}`);
@@ -343,7 +365,7 @@ export class SocialMediaService implements OnModuleInit {
       const modelName = model || 'meta/llama-3.3-70b-instruct';
       const fetchUrl = cleanUrl.endsWith('/v1') ? `${cleanUrl}/chat/completions` : `${cleanUrl}/v1/chat/completions`;
       logs.push(`NVIDIA NIM (${modelName}) ile metin üretiliyor...`);
-      const response = await fetch(fetchUrl, {
+      const response = await this.fetchWithTimeout(fetchUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -357,7 +379,7 @@ export class SocialMediaService implements OnModuleInit {
           ],
           temperature: 0.7,
         })
-      });
+      }, 10000);
       if (!response.ok) {
         const err = await response.text();
         throw new Error(`NVIDIA NIM Hatası [${response.status}]: ${err}`);
@@ -385,7 +407,7 @@ export class SocialMediaService implements OnModuleInit {
       const modelName = model || 'llama-3.3-70b-versatile';
       const fetchUrl = cleanUrl.endsWith('/v1') ? `${cleanUrl}/chat/completions` : `${cleanUrl}/v1/chat/completions`;
       logs.push(`Groq (${modelName}) ile metin üretiliyor...`);
-      const response = await fetch(fetchUrl, {
+      const response = await this.fetchWithTimeout(fetchUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -400,7 +422,7 @@ export class SocialMediaService implements OnModuleInit {
           ],
           temperature: 0.7,
         })
-      });
+      }, 10000);
       if (!response.ok) {
         const err = await response.text();
         throw new Error(`Groq Hatası [${response.status}]: ${err}`);
@@ -428,7 +450,7 @@ export class SocialMediaService implements OnModuleInit {
       const modelName = model || 'grok-2-latest';
       const fetchUrl = cleanUrl.endsWith('/v1') ? `${cleanUrl}/chat/completions` : `${cleanUrl}/v1/chat/completions`;
       logs.push(`xAI Grok (${modelName}) ile metin üretiliyor...`);
-      const response = await fetch(fetchUrl, {
+      const response = await this.fetchWithTimeout(fetchUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -443,7 +465,7 @@ export class SocialMediaService implements OnModuleInit {
           ],
           temperature: 0.7,
         })
-      });
+      }, 10000);
       if (!response.ok) {
         const err = await response.text();
         throw new Error(`xAI Grok Hatası [${response.status}]: ${err}`);
@@ -490,7 +512,7 @@ export class SocialMediaService implements OnModuleInit {
       }
       const fetchUrl = cleanUrl.endsWith('/v1') ? `${cleanUrl}/images/generations` : `${cleanUrl}/v1/images/generations`;
       logs.push(`Özel API (${customImageConfig.name}) ile görsel üretiliyor... model: ${modelName}`);
-      const response = await fetch(fetchUrl, {
+      const response = await this.fetchWithTimeout(fetchUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -504,7 +526,7 @@ export class SocialMediaService implements OnModuleInit {
           n: 1,
           size: '1024x1024'
         })
-      });
+      }, 12000);
       if (!response.ok) {
         const errText = await response.text();
         throw new Error(`Özel model görsel API hatası [${response.status}]: ${errText}`);
@@ -543,7 +565,7 @@ export class SocialMediaService implements OnModuleInit {
       else if (modelName === 'flux-pro') modelName = 'fal-ai/flux/pro';
 
       logs.push(`Fal.ai (${modelName}) ile görsel üretiliyor...`);
-      const response = await fetch(`${falUrl}/${modelName}`, {
+      const response = await this.fetchWithTimeout(`${falUrl}/${modelName}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -553,7 +575,7 @@ export class SocialMediaService implements OnModuleInit {
           prompt: imagePrompt || prompt,
           image_size: 'square_hd'
         })
-      });
+      }, 12000);
       if (!response.ok) {
         const errText = await response.text();
         if (response.status === 403 && errText.includes('TOP_UP')) {
@@ -578,7 +600,7 @@ export class SocialMediaService implements OnModuleInit {
       }
       const modelName = model || 'dall-e-3';
       logs.push(`OpenAI DALL-E (${modelName}) ile görsel üretiliyor...`);
-      const response = await fetch(`${openAiUrl}/v1/images/generations`, {
+      const response = await this.fetchWithTimeout(`${openAiUrl}/v1/images/generations`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -590,7 +612,7 @@ export class SocialMediaService implements OnModuleInit {
           n: 1,
           size: '1024x1024'
         })
-      });
+      }, 12000);
       if (!response.ok) {
         const errText = await response.text();
         throw new Error(`DALL-E Hatası [${response.status}]: ${errText}`);
@@ -609,7 +631,7 @@ export class SocialMediaService implements OnModuleInit {
       }
       let modelName = model || 'imagen-3.0-generate-002';
       logs.push(`Google Gemini (${modelName}) ile görsel üretiliyor...`);
-      const response = await fetch(
+      const response = await this.fetchWithTimeout(
         `${geminiUrl}/v1beta/models/${modelName}:predict?key=${geminiKey}`,
         {
           method: 'POST',
@@ -618,7 +640,8 @@ export class SocialMediaService implements OnModuleInit {
             instances: [{ prompt: imagePrompt || prompt }],
             parameters: { sampleCount: 1, aspectRatio: '1:1' }
           })
-        }
+        },
+        12000
       );
       if (!response.ok) {
         const errText = await response.text();
@@ -638,7 +661,7 @@ export class SocialMediaService implements OnModuleInit {
         throw new Error('Stability AI API Anahtarı eksik veya tanımlanmamış.');
       }
       logs.push('Stability AI ile görsel üretiliyor...');
-      const response = await fetch(
+      const response = await this.fetchWithTimeout(
         'https://api.stability.ai/v1/generation/stable-diffusion-xl-1024-v1-0/text-to-image',
         {
           method: 'POST',
@@ -655,7 +678,8 @@ export class SocialMediaService implements OnModuleInit {
             samples: 1,
             steps: 30
           })
-        }
+        },
+        12000
       );
       if (!response.ok) {
         const errText = await response.text();
@@ -677,7 +701,7 @@ export class SocialMediaService implements OnModuleInit {
       }
       const modelName = model || 'grok-imagine-image-quality';
       logs.push(`xAI Grok (${modelName}) ile görsel üretiliyor...`);
-      const response = await fetch(`${grokUrl}/v1/images/generations`, {
+      const response = await this.fetchWithTimeout(`${grokUrl}/v1/images/generations`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -689,7 +713,7 @@ export class SocialMediaService implements OnModuleInit {
           n: 1,
           size: '1024x1024'
         })
-      });
+      }, 12000);
       if (!response.ok) {
         const errText = await response.text();
         throw new Error(`Grok Hatası [${response.status}]: ${errText}`);
