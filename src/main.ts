@@ -16,20 +16,28 @@ async function bootstrap() {
   app.setGlobalPrefix('api/v1');
 
   // CORS Configuration
+  const allowedOrigins = [
+    'https://www.edirnego.com',
+    'https://edirnego.com',
+    'https://api.edirnego.com',
+    'https://edmin.edirnego.com',
+    'https://www.edmin.edirnego.com',
+    'https://smyp.edirnego.com',
+    'https://www.smyp.edirnego.com',
+    'http://smyp.edirnego.com',
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:5173',
+  ];
+
   app.enableCors({
-    origin: [
-      'https://www.edirnego.com',
-      'https://edirnego.com',
-      'https://api.edirnego.com',
-      'https://edmin.edirnego.com',
-      'https://www.edmin.edirnego.com',
-      'https://smyp.edirnego.com',
-      'https://www.smyp.edirnego.com',
-      'http://smyp.edirnego.com',
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'http://localhost:5173',
-    ],
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.edirnego.com') || origin.includes('localhost')) {
+        callback(null, true);
+      } else {
+        callback(null, true);
+      }
+    },
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
     allowedHeaders: 'Content-Type,Accept,Authorization,X-Requested-With',

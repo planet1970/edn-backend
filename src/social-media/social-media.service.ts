@@ -2668,7 +2668,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
     }
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 seconds timeout
+    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 seconds timeout to prevent proxy 504 Gateway Timeout
     
     try {
       const endpoints = [
