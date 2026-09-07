@@ -12,7 +12,9 @@ dist
 dist-ssr
 *.local
 .env
+scratch/
 scratch_query.js
+uploads/
 
 # Editor directories and files
 .vscode/*
