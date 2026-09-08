@@ -809,7 +809,7 @@ Do not add any other stylistic rules, presets, or constraints. Return ONLY a val
       this.checkAiTokenError(err1, `Metin Modeli (${primaryTextProvider})`);
 
       let fallbackSuccess = false;
-      if (fallbackTextProvider && (fallbackTextProvider !== primaryTextProvider || fallbackTextModel !== primaryTextModel)) {
+      if (fallbackTextProvider && fallbackTextProvider !== primaryTextProvider) {
         try {
           logs.push(`Yedek metin modeline (${fallbackTextProvider} - ${fallbackTextModel}) geçiliyor...`);
           const res = await this.executeSingleTextProvider(
@@ -832,6 +832,29 @@ Do not add any other stylistic rules, presets, or constraints. Return ONLY a val
           this.logger.warn(`Yedek metin modeli (${fallbackTextProvider}) da başarısız oldu: ${err2.message}`);
           logs.push(`Yedek metin modeli (${fallbackTextProvider}) hatası: ${err2.message}`);
           textGenerationError = `Ana Model (${primaryTextProvider}): ${err1.message} | Yedek Model (${fallbackTextProvider}): ${err2.message}`;
+        }
+      } else if (primaryTextProvider !== 'gemini' && (aiSettings.geminiKey || process.env.GEMINI_API_KEY)) {
+        // Auto rescue with Gemini if custom model failed
+        try {
+          logs.push('Kurtarma modeli olarak Google Gemini deneniyor...');
+          const res = await this.executeSingleTextProvider(
+            'gemini',
+            'gemini-2.5-flash',
+            prompt,
+            platform,
+            tone,
+            aiSettings,
+            systemInstruction,
+            logs
+          );
+          caption = res.caption;
+          imagePrompt = res.imagePrompt;
+          videoPrompt = res.videoPrompt;
+          textProviderUsed = 'Google Gemini (Kurtarma)';
+          logs.push(`Metin kurtarma modeli (${textProviderUsed}) ile başarıyla üretildi.`);
+          fallbackSuccess = true;
+        } catch (err3: any) {
+          textGenerationError = `Ana Model (${primaryTextProvider}): ${err1.message} | Kurtarma Modeli: ${err3.message}`;
         }
       } else {
         textGenerationError = `Ana Model (${primaryTextProvider}): ${err1.message}`;
@@ -873,7 +896,7 @@ Do not add any other stylistic rules, presets, or constraints. Return ONLY a val
         this.checkAiTokenError(err1, `Görsel Modeli (${primaryImageProvider})`);
 
         let fallbackSuccess = false;
-        if (fallbackImageProvider && (fallbackImageProvider !== primaryImageProvider || fallbackImageModel !== primaryImageModel)) {
+        if (fallbackImageProvider && fallbackImageProvider !== primaryImageProvider) {
           try {
             logs.push(`Yedek görsel modeline (${fallbackImageProvider} - ${fallbackImageModel}) geçiliyor...`);
             const res = await this.executeSingleImageProvider(
@@ -893,6 +916,26 @@ Do not add any other stylistic rules, presets, or constraints. Return ONLY a val
             this.logger.warn(`Yedek görsel modeli (${fallbackImageProvider}) da başarısız oldu: ${err2.message}`);
             logs.push(`Yedek görsel modeli (${fallbackImageProvider}) hatası: ${err2.message}`);
             imageGenerationError = `Ana Görsel (${primaryImageProvider}): ${err1.message} | Yedek Görsel (${fallbackImageProvider}): ${err2.message}`;
+          }
+        } else if (primaryImageProvider !== 'huggingface' && (aiSettings.huggingFaceKey || process.env.HUGGINGFACE_API_KEY)) {
+          // Auto rescue with Hugging Face
+          try {
+            logs.push('Kurtarma görsel modeli olarak Hugging Face deneniyor...');
+            const res = await this.executeSingleImageProvider(
+              'huggingface',
+              'stabilityai/stable-diffusion-2-1',
+              imagePrompt,
+              prompt,
+              caption,
+              aiSettings,
+              logs
+            );
+            imageUrl = res.imageUrl;
+            imageProviderUsed = 'Hugging Face (Kurtarma)';
+            logs.push(`Görsel kurtarma modeli (${imageProviderUsed}) ile başarıyla üretildi.`);
+            fallbackSuccess = true;
+          } catch (err3: any) {
+            imageGenerationError = `Ana Görsel (${primaryImageProvider}): ${err1.message} | Kurtarma Modeli: ${err3.message}`;
           }
         } else {
           imageGenerationError = `Ana Görsel (${primaryImageProvider}): ${err1.message}`;
@@ -2840,18 +2883,20 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
       updateData.fallbackImageModel = 'runwayml/stable-diffusion-v1-5';
     }
 
-    // Auto-heal if custom model was selected as default text provider but no longer exists
+    // Auto-heal if custom model was selected as default text provider but is invalid/offline/localhost
     const customList = Array.isArray(settings.customModels) ? (settings.customModels as any[]) : [];
     if (settings.defaultTextProvider && settings.defaultTextProvider.startsWith('custom_')) {
-      const exists = customList.some(m => String(m.id) === settings.defaultTextProvider);
-      if (!exists) {
+      const found = customList.find(m => String(m.id) === settings.defaultTextProvider);
+      const isInvalid = !found || !found.apiKey || !found.apiUrl || found.apiUrl.includes('localhost') || found.apiUrl.includes('127.0.0.1');
+      if (isInvalid) {
         updateData.defaultTextProvider = 'gemini';
         updateData.defaultTextModel = 'gemini-2.5-flash';
       }
     }
     if (settings.fallbackTextProvider && settings.fallbackTextProvider.startsWith('custom_')) {
-      const exists = customList.some(m => String(m.id) === settings.fallbackTextProvider);
-      if (!exists) {
+      const found = customList.find(m => String(m.id) === settings.fallbackTextProvider);
+      const isInvalid = !found || !found.apiKey || !found.apiUrl || found.apiUrl.includes('localhost') || found.apiUrl.includes('127.0.0.1') || settings.fallbackTextProvider === settings.defaultTextProvider;
+      if (isInvalid) {
         updateData.fallbackTextProvider = 'openai';
         updateData.fallbackTextModel = 'gpt-4o-mini';
       }

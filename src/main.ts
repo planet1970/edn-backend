@@ -31,16 +31,10 @@ async function bootstrap() {
   ];
 
   app.enableCors({
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin) || origin.endsWith('.edirnego.com') || origin.includes('localhost')) {
-        callback(null, true);
-      } else {
-        callback(null, true);
-      }
-    },
+    origin: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
-    allowedHeaders: 'Content-Type,Accept,Authorization,X-Requested-With',
+    allowedHeaders: 'Content-Type,Accept,Authorization,X-Requested-With,Origin,Access-Control-Request-Method,Access-Control-Request-Headers',
     preflightContinue: false,
     optionsSuccessStatus: 204,
   });
