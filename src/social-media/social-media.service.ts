@@ -820,9 +820,14 @@ Do not add any other stylistic rules, presets, or constraints. Return ONLY a val
       this.checkAiTokenError(err1, `Metin Modeli (${primaryTextProvider})`);
 
       let fallbackSuccess = false;
-      if (fallbackTextProvider && fallbackTextProvider !== primaryTextProvider) {
+      const canRunFallback = fallbackTextProvider && (
+        fallbackTextProvider !== primaryTextProvider ||
+        (fallbackTextModel && fallbackTextModel !== primaryTextModel)
+      );
+
+      if (canRunFallback) {
         try {
-          logs.push(`Yedek metin modeline (${fallbackTextProvider} - ${fallbackTextModel}) geçiliyor...`);
+          logs.push(`Yedek metin modeline (${fallbackTextProvider} - ${fallbackTextModel || 'varsayılan'}) geçiliyor...`);
           const res = await this.executeSingleTextProvider(
             fallbackTextProvider,
             fallbackTextModel,
@@ -844,8 +849,10 @@ Do not add any other stylistic rules, presets, or constraints. Return ONLY a val
           logs.push(`Yedek metin modeli (${fallbackTextProvider}) hatası: ${err2.message}`);
           textGenerationError = `Ana Model (${primaryTextProvider}): ${err1.message} | Yedek Model (${fallbackTextProvider}): ${err2.message}`;
         }
-      } else if (primaryTextProvider !== 'gemini' && (aiSettings.geminiKey || process.env.GEMINI_API_KEY)) {
-        // Auto rescue with Gemini if custom model failed
+      }
+
+      if (!fallbackSuccess && primaryTextProvider !== 'gemini' && fallbackTextProvider !== 'gemini' && (aiSettings.geminiKey || process.env.GEMINI_API_KEY)) {
+        // Auto rescue with Gemini if custom/fallback models failed
         try {
           logs.push('Kurtarma modeli olarak Google Gemini deneniyor...');
           const res = await this.executeSingleTextProvider(
@@ -865,9 +872,9 @@ Do not add any other stylistic rules, presets, or constraints. Return ONLY a val
           logs.push(`Metin kurtarma modeli (${textProviderUsed}) ile başarıyla üretildi.`);
           fallbackSuccess = true;
         } catch (err3: any) {
-          textGenerationError = `Ana Model (${primaryTextProvider}): ${err1.message} | Kurtarma Modeli: ${err3.message}`;
+          textGenerationError = `${textGenerationError ? textGenerationError + ' | ' : ''}Kurtarma Modeli (Gemini): ${err3.message}`;
         }
-      } else {
+      } else if (!fallbackSuccess && !textGenerationError) {
         textGenerationError = `Ana Model (${primaryTextProvider}): ${err1.message}`;
       }
 
@@ -2887,25 +2894,6 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
 
     if (settings.fallbackImageProvider === 'huggingface' && (settings.fallbackImageModel === 'black-forest-labs/FLUX.1-schnell' || settings.fallbackImageModel === 'flux')) {
       updateData.fallbackImageModel = 'runwayml/stable-diffusion-v1-5';
-    }
-
-    // Auto-heal if custom model was selected as default text provider but is invalid/offline/localhost
-    const customList = Array.isArray(settings.customModels) ? (settings.customModels as any[]) : [];
-    if (settings.defaultTextProvider && settings.defaultTextProvider.startsWith('custom_')) {
-      const found = customList.find(m => String(m.id) === settings.defaultTextProvider);
-      const isInvalid = !found || !found.apiKey || !found.apiUrl || found.apiUrl.includes('localhost') || found.apiUrl.includes('127.0.0.1');
-      if (isInvalid) {
-        updateData.defaultTextProvider = 'gemini';
-        updateData.defaultTextModel = 'gemini-2.5-flash';
-      }
-    }
-    if (settings.fallbackTextProvider && settings.fallbackTextProvider.startsWith('custom_')) {
-      const found = customList.find(m => String(m.id) === settings.fallbackTextProvider);
-      const isInvalid = !found || !found.apiKey || !found.apiUrl || found.apiUrl.includes('localhost') || found.apiUrl.includes('127.0.0.1') || settings.fallbackTextProvider === settings.defaultTextProvider;
-      if (isInvalid) {
-        updateData.fallbackTextProvider = 'openai';
-        updateData.fallbackTextModel = 'gpt-4o-mini';
-      }
     }
 
     if (Object.keys(updateData).length > 0) {
