@@ -549,7 +549,15 @@ export class SocialMediaService implements OnModuleInit {
       }, 45000);
       if (!response.ok) {
         const errText = await response.text();
-        throw new Error(`Özel model görsel API hatası [${response.status}]: ${errText}`);
+        let parsedMsg = errText;
+        try {
+          const parsed = JSON.parse(errText);
+          parsedMsg = parsed?.error?.message || errText;
+        } catch (_) {}
+        if (response.status === 404) {
+          throw new Error(`Özel model (${modelName}) görsel API'sinde bulunamadı (404). Seçilen model bir metin (LLM) modeli olabilir. Görsel üretimi için Hugging Face (stabilityai/stable-diffusion-2-1), Fal.ai veya DALL-E gibi bir görsel modeli seçilmelidir.`);
+        }
+        throw new Error(`Özel model görsel API hatası [${response.status}]: ${parsedMsg}`);
       }
       const data = await response.json();
       let img = data.data?.[0]?.url || data.data?.[0]?.b64_json || '';
@@ -914,9 +922,14 @@ Do not add any other stylistic rules, presets, or constraints. Return ONLY a val
         this.checkAiTokenError(err1, `Görsel Modeli (${primaryImageProvider})`);
 
         let fallbackSuccess = false;
-        if (fallbackImageProvider && fallbackImageProvider !== primaryImageProvider) {
+        const canRunImageFallback = fallbackImageProvider && (
+          fallbackImageProvider !== primaryImageProvider ||
+          (fallbackImageModel && fallbackImageModel !== primaryImageModel)
+        );
+
+        if (canRunImageFallback) {
           try {
-            logs.push(`Yedek görsel modeline (${fallbackImageProvider} - ${fallbackImageModel}) geçiliyor...`);
+            logs.push(`Yedek görsel modeline (${fallbackImageProvider} - ${fallbackImageModel || 'varsayılan'}) geçiliyor...`);
             const res = await this.executeSingleImageProvider(
               fallbackImageProvider,
               fallbackImageModel,
@@ -935,10 +948,12 @@ Do not add any other stylistic rules, presets, or constraints. Return ONLY a val
             logs.push(`Yedek görsel modeli (${fallbackImageProvider}) hatası: ${err2.message}`);
             imageGenerationError = `Ana Görsel (${primaryImageProvider}): ${err1.message} | Yedek Görsel (${fallbackImageProvider}): ${err2.message}`;
           }
-        } else if (primaryImageProvider !== 'huggingface' && (aiSettings.huggingFaceKey || process.env.HUGGINGFACE_API_KEY)) {
+        }
+
+        if (!fallbackSuccess && primaryImageProvider !== 'huggingface' && fallbackImageProvider !== 'huggingface' && (aiSettings.huggingFaceKey || process.env.HUGGINGFACE_API_KEY)) {
           // Auto rescue with Hugging Face
           try {
-            logs.push('Kurtarma görsel modeli olarak Hugging Face deneniyor...');
+            logs.push('Kurtarma görsel modeli olarak Hugging Face (stabilityai/stable-diffusion-2-1) deneniyor...');
             const res = await this.executeSingleImageProvider(
               'huggingface',
               'stabilityai/stable-diffusion-2-1',
@@ -953,9 +968,9 @@ Do not add any other stylistic rules, presets, or constraints. Return ONLY a val
             logs.push(`Görsel kurtarma modeli (${imageProviderUsed}) ile başarıyla üretildi.`);
             fallbackSuccess = true;
           } catch (err3: any) {
-            imageGenerationError = `Ana Görsel (${primaryImageProvider}): ${err1.message} | Kurtarma Modeli: ${err3.message}`;
+            imageGenerationError = `${imageGenerationError ? imageGenerationError + ' | ' : ''}Kurtarma Görsel Modeli (Hugging Face): ${err3.message}`;
           }
-        } else {
+        } else if (!fallbackSuccess && !imageGenerationError) {
           imageGenerationError = `Ana Görsel (${primaryImageProvider}): ${err1.message}`;
         }
 
