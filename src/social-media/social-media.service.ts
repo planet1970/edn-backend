@@ -568,6 +568,36 @@ export class SocialMediaService implements OnModuleInit {
       return { imageUrl: img, providerUsed: customImageConfig.name };
     }
 
+    if (provider === 'pollinations') {
+      const modelName = model || 'flux';
+      const cleanPrompt = (imagePrompt || prompt || 'Edirne historical city photo').trim();
+      const seed = Math.floor(Math.random() * 10000000);
+      const encodedPrompt = encodeURIComponent(cleanPrompt);
+      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=${encodeURIComponent(modelName)}&width=1024&height=1024&nologo=true&seed=${seed}`;
+
+      logs.push(`Pollinations AI (${modelName}) ile görsel üretiliyor...`);
+      const response = await this.fetchWithTimeout(pollinationsUrl, {
+        method: 'GET',
+        headers: {
+          'Accept': 'image/jpeg,image/png,image/*,*/*',
+        }
+      }, 55000);
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Pollinations AI Hatası [${response.status}]: ${errText.substring(0, 150)}`);
+      }
+
+      const contentType = response.headers.get('content-type') || 'image/jpeg';
+      const buffer = await response.arrayBuffer();
+      if (!buffer || buffer.byteLength < 200) {
+        throw new Error('Pollinations AI geçerli görsel verisi döndürmedi.');
+      }
+      const base64 = Buffer.from(buffer).toString('base64');
+      const mime = contentType.includes('png') ? 'image/png' : 'image/jpeg';
+      return { imageUrl: `data:${mime};base64,${base64}`, providerUsed: `Pollinations AI (${modelName})` };
+    }
+
     if (provider === 'huggingface') {
       const hfKey = aiSettings.huggingFaceKey || process.env.HUGGINGFACE_API_KEY;
       if (!hfKey) {
@@ -950,13 +980,35 @@ Do not add any other stylistic rules, presets, or constraints. Return ONLY a val
           }
         }
 
+        if (!fallbackSuccess && primaryImageProvider !== 'pollinations' && fallbackImageProvider !== 'pollinations') {
+          // Auto rescue with free Pollinations AI (FLUX)
+          try {
+            logs.push('Kurtarma modeli olarak ücretsiz Pollinations AI (FLUX) deneniyor...');
+            const res = await this.executeSingleImageProvider(
+              'pollinations',
+              'flux',
+              imagePrompt,
+              prompt,
+              caption,
+              aiSettings,
+              logs
+            );
+            imageUrl = res.imageUrl;
+            imageProviderUsed = 'Pollinations AI (Otomatik Kurtarma)';
+            logs.push(`Görsel kurtarma modeli (${imageProviderUsed}) ile başarıyla üretildi.`);
+            fallbackSuccess = true;
+          } catch (errRescue: any) {
+            this.logger.warn(`Pollinations kurtarma modeli de başarısız oldu: ${errRescue.message}`);
+          }
+        }
+
         if (!fallbackSuccess && primaryImageProvider !== 'huggingface' && fallbackImageProvider !== 'huggingface' && (aiSettings.huggingFaceKey || process.env.HUGGINGFACE_API_KEY)) {
           // Auto rescue with Hugging Face
           try {
-            logs.push('Kurtarma görsel modeli olarak Hugging Face (stabilityai/stable-diffusion-2-1) deneniyor...');
+            logs.push('Kurtarma görsel modeli olarak Hugging Face deneniyor...');
             const res = await this.executeSingleImageProvider(
               'huggingface',
-              'stabilityai/stable-diffusion-2-1',
+              'black-forest-labs/FLUX.1-schnell',
               imagePrompt,
               prompt,
               caption,
@@ -968,7 +1020,7 @@ Do not add any other stylistic rules, presets, or constraints. Return ONLY a val
             logs.push(`Görsel kurtarma modeli (${imageProviderUsed}) ile başarıyla üretildi.`);
             fallbackSuccess = true;
           } catch (err3: any) {
-            imageGenerationError = `${imageGenerationError ? imageGenerationError + ' | ' : ''}Kurtarma Görsel Modeli (Hugging Face): ${err3.message}`;
+            imageGenerationError = `${imageGenerationError ? imageGenerationError + ' | ' : ''}Kurtarma Görsel Modeli: ${err3.message}`;
           }
         } else if (!fallbackSuccess && !imageGenerationError) {
           imageGenerationError = `Ana Görsel (${primaryImageProvider}): ${err1.message}`;
@@ -1293,6 +1345,28 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         }
       } else {
         imageError = `Ana Model (${activeImageProvider}): ${err1.message}`;
+      }
+
+      if (!fallbackSuccess && activeImageProvider !== 'pollinations' && fallbackImageProvider !== 'pollinations') {
+        // Auto rescue with free Pollinations AI (FLUX)
+        try {
+          logs.push('Kurtarma modeli olarak ücretsiz Pollinations AI (FLUX) deneniyor...');
+          const res = await this.executeSingleImageProvider(
+            'pollinations',
+            'flux',
+            finalPrompt,
+            finalPrompt,
+            '',
+            aiSettings,
+            logs
+          );
+          imageUrl = res.imageUrl;
+          imageProviderUsed = 'Pollinations AI (Otomatik Kurtarma)';
+          logs.push(`Görsel kurtarma modeli (${imageProviderUsed}) ile başarıyla üretildi.`);
+          fallbackSuccess = true;
+        } catch (errRescue: any) {
+          this.logger.warn(`Pollinations kurtarma modeli de başarısız oldu: ${errRescue.message}`);
+        }
       }
 
       if (!fallbackSuccess) {
