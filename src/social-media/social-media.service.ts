@@ -111,7 +111,7 @@ export class SocialMediaService implements OnModuleInit {
   // 1. Generate post content using specified AI APIs (or simulated)
   private safeExtractAndParseJson(text: string): any {
     if (!text) return null;
-    let clean = text.trim();
+    let clean = text.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
     if (clean.includes('```')) {
       const match = clean.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
       if (match && match[1]) {
@@ -194,7 +194,7 @@ export class SocialMediaService implements OnModuleInit {
               'X-Title': 'EDN Sosyal Medya',
             },
             body: JSON.stringify(body),
-          }, 35000);
+          }, 30000);
         } catch (callErr: any) {
           if (isLocalhost) {
             throw new Error(`Özel API (${customTextConfig.name}): "${cleanUrl}" yerel adresine ulaşılamadı. Sunucu ortamında localhost API'leri doğrudan çalışmaz.`);
@@ -219,25 +219,36 @@ export class SocialMediaService implements OnModuleInit {
       }
 
       const resData = await response.json();
-      const rawText = resData.choices?.[0]?.message?.content || '';
+      let rawText = resData.choices?.[0]?.message?.content || '';
+      
+      // Strip think tags (DeepSeek R1 etc.)
+      rawText = rawText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+
       const parsed = this.safeExtractAndParseJson(rawText);
-      if (!parsed || !parsed.caption) {
-        if (rawText.trim().length > 20 && !rawText.trim().startsWith('{')) {
-          return {
-            caption: rawText.trim(),
-            imagePrompt: prompt,
-            videoPrompt: prompt,
-            providerUsed: customTextConfig.name,
-          };
-        }
-        throw new Error(`Özel API (${customTextConfig.name}) geçerli JSON yanıtı döndürmedi.`);
+      if (parsed && parsed.caption) {
+        return {
+          caption: parsed.caption,
+          imagePrompt: parsed.imagePrompt || prompt,
+          videoPrompt: parsed.videoPrompt || prompt,
+          providerUsed: customTextConfig.name,
+        };
       }
-      return {
-        caption: parsed.caption,
-        imagePrompt: parsed.imagePrompt || '',
-        videoPrompt: parsed.videoPrompt || '',
-        providerUsed: customTextConfig.name,
-      };
+
+      // Robust fallback extraction: if AI returned plain text or imperfect JSON
+      if (rawText.length > 10) {
+        let cleanedText = rawText
+          .replace(/```(?:json)?\s*([\s\S]*?)\s*```/g, '$1')
+          .replace(/^\{[\s\S]*"caption"\s*:\s*"([^"]+)"[\s\S]*\}$/, '$1')
+          .trim();
+        return {
+          caption: cleanedText,
+          imagePrompt: prompt,
+          videoPrompt: prompt,
+          providerUsed: customTextConfig.name,
+        };
+      }
+
+      throw new Error(`Özel API (${customTextConfig.name}) geçerli içerik döndürmedi.`);
     }
 
     if (provider === 'gemini') {
@@ -2743,7 +2754,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
       resolvedModel = 'stabilityai/stable-diffusion-2-1';
     }
 
-    // Candidate models in preference order if first model returns 410 (deprecated) or 404/503
+    // Candidate models in preference order if first model returns 400, 410 (deprecated) or 404/503
     const candidateModels = [
       resolvedModel,
       'stabilityai/stable-diffusion-2-1',
@@ -2751,7 +2762,6 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
       'prompthero/openjourney',
       'CompVis/stable-diffusion-v1-4',
       'segmind/SSD-1B',
-      'stabilityai/sdxl-turbo',
     ].filter((m, idx, arr) => arr.indexOf(m) === idx);
 
     let lastErrorMsg = '';
@@ -2759,7 +2769,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
 
     for (const currModel of candidateModels) {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 40000); // 40 seconds timeout
+      const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 seconds timeout per candidate
 
       try {
         const endpoints = [
@@ -2783,8 +2793,8 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
             });
             if (response.ok) break;
             lastErrText = await response.text();
-            // If 410 or 404, break to try next model in candidate list
-            if (response.status === 410 || response.status === 404) break;
+            // If 400, 410 or 404, break to try next model in candidate list
+            if (response.status === 400 || response.status === 410 || response.status === 404) break;
           } catch (fetchErr: any) {
             lastErrText = fetchErr.message;
           }
@@ -2816,21 +2826,17 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
 
         lastErrorMsg = `Hugging Face (${currModel}) [${lastStatus || 'Bağlantı'}]: ${errDetails}`;
 
-        // If 410 Gone (deprecated) or 404 Not Found, try next candidate model
-        if (lastStatus === 410 || lastStatus === 404 || lastStatus === 503) {
-          continue;
-        }
-
         // If 401/403 (invalid API key/token), stop and report token issue immediately
         if (lastStatus === 401 || lastStatus === 403) {
           break;
         }
+
+        // For all other errors (400, 404, 410, 503, timeout), continue trying next candidate model!
+        continue;
       } catch (err: any) {
         clearTimeout(timeoutId);
         lastErrorMsg = err.message;
-        if (err.name === 'AbortError') {
-          continue; // Try next model on timeout
-        }
+        continue;
       }
     }
 
