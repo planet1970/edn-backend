@@ -88,7 +88,7 @@ export class SocialMediaService implements OnModuleInit {
     return `${baseUrl}${cleanUrl}`;
   }
 
-  private async fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 12000): Promise<Response> {
+  private async fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 45000): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -170,6 +170,8 @@ export class SocialMediaService implements OnModuleInit {
       const fetchUrl = cleanUrl.endsWith('/v1') ? `${cleanUrl}/chat/completions` : `${cleanUrl}/v1/chat/completions`;
       logs.push(`Özel API (${customTextConfig.name}) ile metin üretiliyor... model: ${modelName}`);
 
+      const isLocalhost = cleanUrl.includes('localhost') || cleanUrl.includes('127.0.0.1');
+
       const callApi = async (useJsonMode: boolean) => {
         const body: any = {
           model: modelName,
@@ -182,16 +184,23 @@ export class SocialMediaService implements OnModuleInit {
         if (useJsonMode) {
           body.response_format = { type: 'json_object' };
         }
-        return await this.fetchWithTimeout(fetchUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${customKey}`,
-            'HTTP-Referer': 'http://localhost:5173',
-            'X-Title': 'EDN Sosyal Medya',
-          },
-          body: JSON.stringify(body),
-        }, 10000);
+        try {
+          return await this.fetchWithTimeout(fetchUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${customKey}`,
+              'HTTP-Referer': 'http://localhost:5173',
+              'X-Title': 'EDN Sosyal Medya',
+            },
+            body: JSON.stringify(body),
+          }, 35000);
+        } catch (callErr: any) {
+          if (isLocalhost) {
+            throw new Error(`Özel API (${customTextConfig.name}): "${cleanUrl}" yerel adresine ulaşılamadı. Sunucu ortamında localhost API'leri doğrudan çalışmaz.`);
+          }
+          throw callErr;
+        }
       };
 
       let response = await callApi(true);
@@ -252,7 +261,7 @@ export class SocialMediaService implements OnModuleInit {
             generationConfig: { responseMimeType: 'application/json', temperature: 0.7 }
           })
         },
-        10000
+        35000
       );
       if (!response.ok) {
         const err = await response.text();
@@ -295,7 +304,7 @@ export class SocialMediaService implements OnModuleInit {
           ],
           temperature: 0.7,
         }),
-      }, 10000);
+      }, 35000);
       if (!response.ok) {
         const err = await response.text();
         throw new Error(`OpenAI Hatası [${response.status}]: ${err}`);
@@ -337,7 +346,7 @@ export class SocialMediaService implements OnModuleInit {
             { role: 'user', content: `Konu/Prompt: "${prompt}"\nPlatform: ${platform}\nSes Tonu: ${tone}\n\nİçeriği oluştur:` }
           ]
         })
-      }, 10000);
+      }, 35000);
       if (!response.ok) {
         const err = await response.text();
         throw new Error(`Claude Hatası [${response.status}]: ${err}`);
@@ -379,7 +388,7 @@ export class SocialMediaService implements OnModuleInit {
           ],
           temperature: 0.7,
         })
-      }, 10000);
+      }, 35000);
       if (!response.ok) {
         const err = await response.text();
         throw new Error(`NVIDIA NIM Hatası [${response.status}]: ${err}`);
@@ -422,7 +431,7 @@ export class SocialMediaService implements OnModuleInit {
           ],
           temperature: 0.7,
         })
-      }, 10000);
+      }, 35000);
       if (!response.ok) {
         const err = await response.text();
         throw new Error(`Groq Hatası [${response.status}]: ${err}`);
@@ -465,7 +474,7 @@ export class SocialMediaService implements OnModuleInit {
           ],
           temperature: 0.7,
         })
-      }, 10000);
+      }, 35000);
       if (!response.ok) {
         const err = await response.text();
         throw new Error(`xAI Grok Hatası [${response.status}]: ${err}`);
@@ -526,7 +535,7 @@ export class SocialMediaService implements OnModuleInit {
           n: 1,
           size: '1024x1024'
         })
-      }, 12000);
+      }, 45000);
       if (!response.ok) {
         const errText = await response.text();
         throw new Error(`Özel model görsel API hatası [${response.status}]: ${errText}`);
@@ -547,9 +556,9 @@ export class SocialMediaService implements OnModuleInit {
       }
       const finalPrompt = imagePrompt || prompt;
       const uniquePrompt = `${finalPrompt.trim()} [Variation: ${Math.random().toString(36).substring(7)}]`;
-      const modelPath = model || 'black-forest-labs/FLUX.1-schnell';
+      const modelPath = model || 'stabilityai/stable-diffusion-2-1';
       logs.push(`Hugging Face (${modelPath}) ile görsel üretiliyor...`);
-      const img = await this.generateHuggingFaceImage(modelPath, uniquePrompt, hfKey);
+      const img = await this.generateHuggingFaceImage(modelPath, uniquePrompt, hfKey, logs);
       return { imageUrl: img, providerUsed: `Hugging Face (${modelPath})` };
     }
 
@@ -575,7 +584,7 @@ export class SocialMediaService implements OnModuleInit {
           prompt: imagePrompt || prompt,
           image_size: 'square_hd'
         })
-      }, 12000);
+      }, 45000);
       if (!response.ok) {
         const errText = await response.text();
         if (response.status === 403 && errText.includes('TOP_UP')) {
@@ -612,7 +621,7 @@ export class SocialMediaService implements OnModuleInit {
           n: 1,
           size: '1024x1024'
         })
-      }, 12000);
+      }, 45000);
       if (!response.ok) {
         const errText = await response.text();
         throw new Error(`DALL-E Hatası [${response.status}]: ${errText}`);
@@ -641,7 +650,7 @@ export class SocialMediaService implements OnModuleInit {
             parameters: { sampleCount: 1, aspectRatio: '1:1' }
           })
         },
-        12000
+        45000
       );
       if (!response.ok) {
         const errText = await response.text();
@@ -679,7 +688,7 @@ export class SocialMediaService implements OnModuleInit {
             steps: 30
           })
         },
-        12000
+        45000
       );
       if (!response.ok) {
         const errText = await response.text();
@@ -713,7 +722,7 @@ export class SocialMediaService implements OnModuleInit {
           n: 1,
           size: '1024x1024'
         })
-      }, 12000);
+      }, 45000);
       if (!response.ok) {
         const errText = await response.text();
         throw new Error(`Grok Hatası [${response.status}]: ${errText}`);
@@ -763,7 +772,7 @@ export class SocialMediaService implements OnModuleInit {
     const fallbackTextModel = aiSettings.fallbackTextModel;
 
     const primaryImageProvider = imageProvider || aiSettings.defaultImageProvider || 'huggingface';
-    const primaryImageModel = imageModel || aiSettings.defaultImageModel || 'flux';
+    const primaryImageModel = imageModel || aiSettings.defaultImageModel || 'stabilityai/stable-diffusion-2-1';
     const fallbackImageProvider = aiSettings.fallbackImageProvider;
     const fallbackImageModel = aiSettings.fallbackImageModel;
 
@@ -1109,7 +1118,7 @@ Do not add any other stylistic rules, presets, or constraints. Return ONLY a val
   ) {
     const aiSettings = await this.getAiSettings();
     const activeImageProvider = imageProvider || aiSettings.defaultImageProvider || 'huggingface';
-    const activeImageModel = imageModel || aiSettings.defaultImageModel || 'flux';
+    const activeImageModel = imageModel || aiSettings.defaultImageModel || 'stabilityai/stable-diffusion-2-1';
     const fallbackImageProvider = aiSettings.fallbackImageProvider;
     const fallbackImageModel = aiSettings.fallbackImageModel;
 
@@ -2050,7 +2059,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
     const textProvider = aiSettings.defaultTextProvider || 'gemini';
     const textModel = aiSettings.defaultTextModel || 'gemini-2.5-flash';
     const imageProvider = aiSettings.defaultImageProvider || 'huggingface';
-    const imageModel = aiSettings.defaultImageModel || 'flux';
+    const imageModel = aiSettings.defaultImageModel || 'stabilityai/stable-diffusion-2-1';
 
     // Generate content
     const genResult = await this.generatePost(
@@ -2234,7 +2243,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         const textProvider = aiSettings.defaultTextProvider || 'gemini';
         const textModel = aiSettings.defaultTextModel || 'gemini-2.5-flash';
         const imageProvider = aiSettings.defaultImageProvider || 'huggingface';
-        const imageModel = aiSettings.defaultImageModel || 'flux';
+        const imageModel = aiSettings.defaultImageModel || 'stabilityai/stable-diffusion-2-1';
 
         // Generate content
         this.logger.log(`Kampanya postu üretiliyor... Prompt: "${campaign.prompt}"`);
@@ -2679,53 +2688,78 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
     }
   }
 
-  private async generateHuggingFaceImage(modelPath: string, prompt: string, hfKey: string): Promise<string> {
-    // Map common model aliases and deprecated models to active working Hugging Face model IDs
-    let resolvedModel = modelPath;
-    const modelLower = modelPath.toLowerCase();
+  private async generateHuggingFaceImage(modelPath: string, prompt: string, hfKey: string, logs?: string[]): Promise<string> {
+    // Map common model aliases to active working Hugging Face model IDs
+    let resolvedModel = modelPath || 'stabilityai/stable-diffusion-2-1';
+    const modelLower = (modelPath || '').toLowerCase();
     if (modelLower === 'flux' || modelLower === 'flux-schnell' || modelLower === 'flux.1-schnell') {
       resolvedModel = 'black-forest-labs/FLUX.1-schnell';
     } else if (modelLower === 'flux-dev' || modelLower === 'flux.1-dev') {
       resolvedModel = 'black-forest-labs/FLUX.1-dev';
     } else if (modelLower === 'sdxl' || modelLower === 'stable-diffusion-xl' || modelLower.includes('stable-diffusion-xl-base-1.0') || modelLower.includes('stable-diffusion-3-medium')) {
-      resolvedModel = 'black-forest-labs/FLUX.1-schnell';
+      resolvedModel = 'stabilityai/stable-diffusion-2-1';
     }
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 seconds timeout to prevent proxy 504 Gateway Timeout
-    
-    try {
-      const endpoints = [
-        `https://router.huggingface.co/hf-inference/models/${resolvedModel}`,
-        `https://api-inference.huggingface.co/models/${resolvedModel}`,
-      ];
+    // Candidate models in preference order if first model returns 410 (deprecated) or 404/503
+    const candidateModels = [
+      resolvedModel,
+      'stabilityai/stable-diffusion-2-1',
+      'runwayml/stable-diffusion-v1-5',
+      'prompthero/openjourney',
+      'CompVis/stable-diffusion-v1-4',
+      'segmind/SSD-1B',
+      'stabilityai/sdxl-turbo',
+    ].filter((m, idx, arr) => arr.indexOf(m) === idx);
 
-      let response: Response | null = null;
-      let lastErrText = '';
+    let lastErrorMsg = '';
+    let lastStatus: number | undefined;
 
-      for (const endpoint of endpoints) {
-        try {
-          response = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${hfKey}`,
-            },
-            body: JSON.stringify({ inputs: prompt }),
-            signal: controller.signal,
-          });
-          if (response.ok) break;
-          lastErrText = await response.text();
-          // If 410 Gone, router tells model is deprecated, break to report
-          if (response.status === 410) break;
-        } catch (fetchErr: any) {
-          lastErrText = fetchErr.message;
+    for (const currModel of candidateModels) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 40000); // 40 seconds timeout
+
+      try {
+        const endpoints = [
+          `https://router.huggingface.co/hf-inference/models/${currModel}`,
+          `https://api-inference.huggingface.co/models/${currModel}`,
+        ];
+
+        let response: Response | null = null;
+        let lastErrText = '';
+
+        for (const endpoint of endpoints) {
+          try {
+            response = await fetch(endpoint, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${hfKey}`,
+              },
+              body: JSON.stringify({ inputs: prompt }),
+              signal: controller.signal,
+            });
+            if (response.ok) break;
+            lastErrText = await response.text();
+            // If 410 or 404, break to try next model in candidate list
+            if (response.status === 410 || response.status === 404) break;
+          } catch (fetchErr: any) {
+            lastErrText = fetchErr.message;
+          }
         }
-      }
 
-      clearTimeout(timeoutId);
+        clearTimeout(timeoutId);
 
-      if (!response || !response.ok) {
+        if (response && response.ok) {
+          const contentType = response.headers.get('content-type') || 'image/jpeg';
+          const buffer = await response.arrayBuffer();
+          const base64 = Buffer.from(buffer).toString('base64');
+          if (currModel !== resolvedModel && logs) {
+            logs.push(`Hugging Face: "${resolvedModel}" sunucuda desteklenmediğinden alternatif model ("${currModel}") kullanılarak görsel başarıyla üretildi.`);
+          }
+          return `data:${contentType.includes('png') ? 'image/png' : 'image/jpeg'};base64,${base64}`;
+        }
+
+        lastStatus = response?.status;
         let errDetails = lastErrText;
         try {
           const errJson = JSON.parse(lastErrText);
@@ -2735,49 +2769,37 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         } catch {
           errDetails = lastErrText.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim();
         }
-        if (errDetails.length > 200) {
-          errDetails = errDetails.substring(0, 200) + '...';
+        if (errDetails.length > 200) errDetails = errDetails.substring(0, 200) + '...';
+
+        lastErrorMsg = `Hugging Face (${currModel}) [${lastStatus || 'Bağlantı'}]: ${errDetails}`;
+
+        // If 410 Gone (deprecated) or 404 Not Found, try next candidate model
+        if (lastStatus === 410 || lastStatus === 404 || lastStatus === 503) {
+          continue;
         }
 
-        let friendlyMessage = `Hugging Face hatası: ${response?.status || 'Bağlantı'} - ${errDetails}`;
-        if (response?.status === 410) {
-          friendlyMessage = `Hugging Face (410): "${resolvedModel}" modeli Hugging Face sunucusunda artık desteklenmiyor veya deprecated edilmiş. Lütfen model ayarlarından farklı bir görsel modeli seçin.`;
-        } else if (response?.status === 401) {
-          friendlyMessage = `Hugging Face Yetkilendirme Hatası (401): Lütfen geçerli bir Hugging Face API Token girdiğinizden emin olun.`;
-        } else if (response?.status === 403) {
-          friendlyMessage = `Hugging Face Erişim Reddedildi (403): Token izinleri veya model lisans kabulü eksik. Detay: ${errDetails}`;
-        } else if (response?.status === 404) {
-          friendlyMessage = `Hugging Face Model Bulunamadı (404): "${resolvedModel}" isimli model mevcut değil.`;
-        } else if (response?.status === 429) {
-          friendlyMessage = `Hugging Face Kota/Limit Aşımı (429): Çok fazla istek yapıldı veya kota doldu.`;
-        } else if (response?.status === 503) {
-          friendlyMessage = `Hugging Face Servis Dışı (503): Model Hugging Face sunucularına şu an yükleniyor. Lütfen 1-2 dakika sonra tekrar deneyin.`;
+        // If 401/403 (invalid API key/token), stop and report token issue immediately
+        if (lastStatus === 401 || lastStatus === 403) {
+          break;
         }
-        
-        throw new Error(friendlyMessage);
-      }
-
-      const buffer = await response.arrayBuffer();
-      const base64 = Buffer.from(buffer).toString('base64');
-      return `data:image/jpeg;base64,${base64}`;
-    } catch (error: any) {
-      clearTimeout(timeoutId);
-      
-      if (error.name === 'TypeError' && error.message === 'fetch failed') {
-        const cause = error.cause;
-        let networkDetails = 'Bilinmeyen ağ hatası';
-        if (cause) {
-          networkDetails = `${cause.code || cause.name || ''} - ${cause.message || ''}`;
+      } catch (err: any) {
+        clearTimeout(timeoutId);
+        lastErrorMsg = err.message;
+        if (err.name === 'AbortError') {
+          continue; // Try next model on timeout
         }
-        throw new Error(`Hugging Face sunucusuna bağlantı başarısız (DNS/Fetch Failed): ${networkDetails}`);
       }
-      
-      if (error.name === 'AbortError') {
-        throw new Error(`Hugging Face istek zaman aşımı (60 saniye). Model yanıt vermedi.`);
-      }
-
-      throw error;
     }
+
+    if (lastStatus === 401) {
+      throw new Error(`Hugging Face Yetkilendirme Hatası (401): Lütfen geçerli bir Hugging Face API Token girdiğinizden emin olun.`);
+    } else if (lastStatus === 403) {
+      throw new Error(`Hugging Face Erişim Reddedildi (403): Token izinleri veya model lisans kabulü eksik. Detay: ${lastErrorMsg}`);
+    } else if (lastStatus === 410) {
+      throw new Error(`Hugging Face (410): "${resolvedModel}" ve alternatif modeller Hugging Face ücretsiz sunucusunda şu anda kullanılamıyor. Lütfen model ayarlarından farklı bir görsel modeli veya Fal.ai / DALL-E seçin.`);
+    }
+
+    throw new Error(lastErrorMsg || `Hugging Face modelleri yanıt vermedi.`);
   }
 
   async getAiSettings() {
@@ -2790,18 +2812,55 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
       });
     }
     const defaultModels = [
-      'black-forest-labs/FLUX.1-schnell',
-      'black-forest-labs/FLUX.1-dev',
+      'stabilityai/stable-diffusion-2-1',
       'runwayml/stable-diffusion-v1-5',
-      'playgroundai/playground-v2.5-1024px-aesthetic',
+      'prompthero/openjourney',
+      'CompVis/stable-diffusion-v1-4',
+      'segmind/SSD-1B',
+      'stabilityai/sdxl-turbo',
+      'black-forest-labs/FLUX.1-schnell',
     ];
 
-    const hasDeprecated = Array.isArray(settings.huggingFaceModels) && (settings.huggingFaceModels as string[]).some(m => m.includes('stable-diffusion-xl-base-1.0') || m.includes('stable-diffusion-3-medium'));
+    const hasDeprecated = Array.isArray(settings.huggingFaceModels) && (settings.huggingFaceModels as string[]).some(m => 
+      m.includes('stable-diffusion-xl-base-1.0') || m.includes('stable-diffusion-3-medium') || m.includes('playgroundai')
+    );
+
+    const updateData: any = {};
 
     if (!settings.huggingFaceModels || (Array.isArray(settings.huggingFaceModels) && settings.huggingFaceModels.length === 0) || hasDeprecated) {
+      updateData.huggingFaceModels = defaultModels;
+    }
+
+    // Auto-migrate defaultImageModel if set to deprecated/410 FLUX.1-schnell on free Hugging Face
+    if (settings.defaultImageProvider === 'huggingface' && (settings.defaultImageModel === 'black-forest-labs/FLUX.1-schnell' || settings.defaultImageModel === 'flux')) {
+      updateData.defaultImageModel = 'stabilityai/stable-diffusion-2-1';
+    }
+
+    if (settings.fallbackImageProvider === 'huggingface' && (settings.fallbackImageModel === 'black-forest-labs/FLUX.1-schnell' || settings.fallbackImageModel === 'flux')) {
+      updateData.fallbackImageModel = 'runwayml/stable-diffusion-v1-5';
+    }
+
+    // Auto-heal if custom model was selected as default text provider but no longer exists
+    const customList = Array.isArray(settings.customModels) ? (settings.customModels as any[]) : [];
+    if (settings.defaultTextProvider && settings.defaultTextProvider.startsWith('custom_')) {
+      const exists = customList.some(m => String(m.id) === settings.defaultTextProvider);
+      if (!exists) {
+        updateData.defaultTextProvider = 'gemini';
+        updateData.defaultTextModel = 'gemini-2.5-flash';
+      }
+    }
+    if (settings.fallbackTextProvider && settings.fallbackTextProvider.startsWith('custom_')) {
+      const exists = customList.some(m => String(m.id) === settings.fallbackTextProvider);
+      if (!exists) {
+        updateData.fallbackTextProvider = 'openai';
+        updateData.fallbackTextModel = 'gpt-4o-mini';
+      }
+    }
+
+    if (Object.keys(updateData).length > 0) {
       settings = await this.prisma.aiModelSetting.update({
         where: { id: 'GLOBAL' },
-        data: { huggingFaceModels: defaultModels },
+        data: updateData,
       });
     }
     return settings;
@@ -2865,7 +2924,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         fallbackTextProvider: data.fallbackTextProvider || 'openai',
         fallbackTextModel: data.fallbackTextModel || 'gpt-4o-mini',
         defaultImageProvider: data.defaultImageProvider || 'huggingface',
-        defaultImageModel: data.defaultImageModel || 'flux',
+        defaultImageModel: data.defaultImageModel || 'stabilityai/stable-diffusion-2-1',
         fallbackImageProvider: data.fallbackImageProvider || 'gemini',
         fallbackImageModel: data.fallbackImageModel || 'imagen-4.0-generate-001',
         defaultVideoProvider: data.defaultVideoProvider || 'fal',

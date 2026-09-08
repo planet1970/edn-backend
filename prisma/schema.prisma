@@ -707,7 +707,7 @@ model AiModelSetting {
   fallbackTextProvider  String?  @default("openai")
   fallbackTextModel     String?  @default("gpt-4o-mini")
   defaultImageProvider  String   @default("huggingface")
-  defaultImageModel     String   @default("flux")
+  defaultImageModel     String   @default("stabilityai/stable-diffusion-2-1")
   fallbackImageProvider String?  @default("gemini")
   fallbackImageModel    String?  @default("imagen-4.0-generate-001")
   defaultVideoProvider  String?  @default("fal")
