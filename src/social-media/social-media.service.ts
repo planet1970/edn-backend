@@ -569,19 +569,33 @@ export class SocialMediaService implements OnModuleInit {
     }
 
     if (provider === 'pollinations') {
-      const modelName = model || 'flux';
+      let modelName = model || 'flux';
+      if (modelName === 'turbo') modelName = 'flux';
       const cleanPrompt = (imagePrompt || prompt || 'Edirne historical city photo').trim();
       const seed = Math.floor(Math.random() * 10000000);
       const encodedPrompt = encodeURIComponent(cleanPrompt);
       const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=${encodeURIComponent(modelName)}&width=1024&height=1024&nologo=true&seed=${seed}`;
 
       logs.push(`Pollinations AI (${modelName}) ile görsel üretiliyor...`);
-      const response = await this.fetchWithTimeout(pollinationsUrl, {
+      let response = await this.fetchWithTimeout(pollinationsUrl, {
         method: 'GET',
         headers: {
           'Accept': 'image/jpeg,image/png,image/*,*/*',
         }
       }, 55000);
+
+      if (!response.ok && (response.status === 429 || response.status === 500)) {
+        logs.push('Pollinations sunucusu meşgul, 3 saniye sonra FLUX ile yeniden deneniyor...');
+        await new Promise(r => setTimeout(r, 3000));
+        const retrySeed = Math.floor(Math.random() * 10000000);
+        const retryUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=flux-realism&width=1024&height=1024&nologo=true&seed=${retrySeed}`;
+        try {
+          response = await this.fetchWithTimeout(retryUrl, {
+            method: 'GET',
+            headers: { 'Accept': 'image/jpeg,image/png,image/*,*/*' }
+          }, 55000);
+        } catch (_) {}
+      }
 
       if (!response.ok) {
         const errText = await response.text();
