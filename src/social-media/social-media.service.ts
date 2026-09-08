@@ -574,32 +574,45 @@ export class SocialMediaService implements OnModuleInit {
       const cleanPrompt = (imagePrompt || prompt || 'Edirne historical city photo').trim();
       const seed = Math.floor(Math.random() * 10000000);
       const encodedPrompt = encodeURIComponent(cleanPrompt);
-      const pollinationsUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=${encodeURIComponent(modelName)}&width=1024&height=1024&nologo=true&seed=${seed}`;
+      const polKey = aiSettings.pollinationsKey || process.env.POLLINATIONS_API_KEY || 'sk_YjOUav0yEclSUvtSIjxZsPu00u6UYlwD';
 
       logs.push(`Pollinations AI (${modelName}) ile görsel üretiliyor...`);
-      let response = await this.fetchWithTimeout(pollinationsUrl, {
-        method: 'GET',
-        headers: {
-          'Accept': 'image/jpeg,image/png,image/*,*/*',
-        }
-      }, 55000);
 
-      if (!response.ok && (response.status === 429 || response.status === 500)) {
-        logs.push('Pollinations sunucusu meşgul, 3 saniye sonra FLUX ile yeniden deneniyor...');
-        await new Promise(r => setTimeout(r, 3000));
-        const retrySeed = Math.floor(Math.random() * 10000000);
-        const retryUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=flux-realism&width=1024&height=1024&nologo=true&seed=${retrySeed}`;
+      let response: Response | null = null;
+      let lastErr = '';
+
+      if (polKey) {
         try {
-          response = await this.fetchWithTimeout(retryUrl, {
+          const genUrl = `https://gen.pollinations.ai/image/${encodedPrompt}?model=${encodeURIComponent(modelName)}&width=1024&height=1024&nologo=true&seed=${seed}`;
+          response = await this.fetchWithTimeout(genUrl, {
             method: 'GET',
-            headers: { 'Accept': 'image/jpeg,image/png,image/*,*/*' }
+            headers: {
+              'Authorization': `Bearer ${polKey}`,
+              'Accept': 'image/jpeg,image/png,image/*,*/*',
+            }
           }, 55000);
-        } catch (_) {}
+        } catch (e: any) {
+          lastErr = e.message;
+        }
       }
 
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Pollinations AI Hatası [${response.status}]: ${errText.substring(0, 150)}`);
+      if (!response || !response.ok) {
+        const publicUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?model=${encodeURIComponent(modelName)}&width=1024&height=1024&nologo=true&seed=${seed}`;
+        try {
+          response = await this.fetchWithTimeout(publicUrl, {
+            method: 'GET',
+            headers: {
+              'Accept': 'image/jpeg,image/png,image/*,*/*',
+            }
+          }, 55000);
+        } catch (e: any) {
+          lastErr = e.message;
+        }
+      }
+
+      if (!response || !response.ok) {
+        const errText = response ? await response.text() : lastErr;
+        throw new Error(`Pollinations AI Hatası [${response?.status || 'Bağlantı'}]: ${errText.substring(0, 150)}`);
       }
 
       const contentType = response.headers.get('content-type') || 'image/jpeg';
