@@ -108,6 +108,102 @@ export class SocialMediaService implements OnModuleInit {
     }
   }
 
+  // Helper to clean and normalize post caption (strips JSON formatting, code blocks, escaped characters)
+  cleanPostCaption(caption: string): string {
+    if (!caption) return '';
+    let text = caption.trim();
+
+    // Strip markdown code fences if wrapped
+    if (text.startsWith('```')) {
+      text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    }
+
+    // Decode Unicode escape sequences if raw \u00xx or \uXXXX present
+    if (/\\u[0-9a-fA-F]{4}/.test(text)) {
+      try {
+        text = text.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+      } catch {}
+    }
+
+    // If text looks like a JSON object
+    if (text.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(text);
+        if (typeof parsed.caption === 'string' && parsed.caption.trim()) {
+          return this.cleanPostCaption(parsed.caption);
+        }
+        const candidateKeys = [': ', ':', 'text', 'content', 'post', 'gönderi', 'message', 'description', 'icerik', 'içerik'];
+        for (const k of candidateKeys) {
+          if (typeof parsed[k] === 'string' && parsed[k].trim()) {
+            return this.cleanPostCaption(parsed[k]);
+          }
+        }
+        for (const [k, v] of Object.entries(parsed)) {
+          if (k.toLowerCase().includes('prompt')) continue;
+          if (typeof v === 'string' && v.length > 20) {
+            return this.cleanPostCaption(v);
+          }
+        }
+      } catch {
+        const firstBrace = text.indexOf('{');
+        const lastBrace = text.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+          try {
+            const subParsed = JSON.parse(text.substring(firstBrace, lastBrace + 1));
+            if (typeof subParsed.caption === 'string' && subParsed.caption.trim()) {
+              return this.cleanPostCaption(subParsed.caption);
+            }
+            for (const [k, v] of Object.entries(subParsed)) {
+              if (k.toLowerCase().includes('prompt')) continue;
+              if (typeof v === 'string' && v.length > 20) {
+                return this.cleanPostCaption(v);
+              }
+            }
+          } catch {}
+        }
+
+        // Regex extraction: try to match caption value up to the next key or end
+        const match = text.match(/"(?:caption|text|content|gönderi|:\s*)"\s*:\s*"([\s\S]*?)(?:"\s*,\s*"|"\s*})/i);
+        if (match && match[1]) {
+          return this.cleanPostCaption(match[1].replace(/\\"/g, '"').replace(/\\n/g, '\n').replace(/\\r/g, ''));
+        }
+
+        // Heuristic: If caption starts with {"caption": " or {": ": " or {"text": "
+        const startMatch = text.match(/^\{[\s\S]*?"(?:caption|text|content|gönderi|:\s*)"\s*:\s*"/i);
+        if (startMatch) {
+          let remainder = text.substring(startMatch[0].length);
+          const promptIndex = remainder.search(/"\s*,\s*"(?:imagePrompt|videoPrompt|prompt)"/i);
+          if (promptIndex !== -1) {
+            remainder = remainder.substring(0, promptIndex);
+          } else if (remainder.endsWith('"}') || remainder.endsWith('"}')) {
+            remainder = remainder.replace(/"\s*\}\s*$/, '');
+          }
+          return this.cleanPostCaption(remainder.replace(/\\"/g, '"').replace(/\\n/g, '\n').replace(/\\r/g, ''));
+        }
+      }
+    }
+
+    // Replace literal escaped newlines/quotes if present
+    if (text.includes('\\n') && !text.includes('\n')) {
+      text = text.replace(/\\n/g, '\n');
+    }
+    if (text.includes('\\"')) {
+      text = text.replace(/\\"/g, '"');
+    }
+
+    // Safety: Instagram max caption length is 2200 characters
+    if (text.length > 2200) {
+      const lastBreak = text.lastIndexOf('\n', 2150);
+      if (lastBreak > 1800) {
+        text = text.substring(0, lastBreak).trim();
+      } else {
+        text = text.substring(0, 2190).trim() + '...';
+      }
+    }
+
+    return text.trim();
+  }
+
   // 1. Generate post content using specified AI APIs (or simulated)
   private safeExtractAndParseJson(text: string): any {
     if (!text) return null;
@@ -118,26 +214,54 @@ export class SocialMediaService implements OnModuleInit {
         clean = match[1].trim();
       }
     }
+
+    const normalizeResult = (obj: any): any => {
+      if (!obj || typeof obj !== 'object') return null;
+      if (typeof obj.caption === 'string' && obj.caption.trim()) {
+        obj.caption = this.cleanPostCaption(obj.caption);
+        return obj;
+      }
+      const candidateKeys = [': ', ':', 'text', 'content', 'post', 'gönderi', 'message', 'description', 'icerik', 'içerik'];
+      for (const k of candidateKeys) {
+        if (typeof obj[k] === 'string' && obj[k].trim()) {
+          obj.caption = this.cleanPostCaption(obj[k]);
+          return obj;
+        }
+      }
+      for (const [k, v] of Object.entries(obj)) {
+        if (k.toLowerCase().includes('prompt')) continue;
+        if (typeof v === 'string' && v.length > 20) {
+          obj.caption = this.cleanPostCaption(v);
+          return obj;
+        }
+      }
+      return obj;
+    };
+
     try {
-      return JSON.parse(clean);
+      const parsed = JSON.parse(clean);
+      return normalizeResult(parsed);
     } catch {
       const firstBrace = clean.indexOf('{');
       const lastBrace = clean.lastIndexOf('}');
       if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
         try {
-          return JSON.parse(clean.substring(firstBrace, lastBrace + 1));
+          const parsed = JSON.parse(clean.substring(firstBrace, lastBrace + 1));
+          return normalizeResult(parsed);
         } catch {
-          const captionMatch = clean.match(/"caption"\s*:\s*"([\s\S]*?)"(?=\s*,\s*"|\s*})/);
-          const imagePromptMatch = clean.match(/"imagePrompt"\s*:\s*"([\s\S]*?)"(?=\s*,\s*"|\s*})/);
-          const videoPromptMatch = clean.match(/"videoPrompt"\s*:\s*"([\s\S]*?)"(?=\s*,\s*"|\s*})/);
-          if (captionMatch || imagePromptMatch) {
-            return {
-              caption: captionMatch ? captionMatch[1].replace(/\\"/g, '"').replace(/\\n/g, '\n') : '',
-              imagePrompt: imagePromptMatch ? imagePromptMatch[1].replace(/\\"/g, '"') : '',
-              videoPrompt: videoPromptMatch ? videoPromptMatch[1].replace(/\\"/g, '"') : '',
-            };
-          }
+          // Continue to fallback regex
         }
+      }
+      const captionMatch = clean.match(/"(?:caption|text|content|gönderi|:\s*)"\s*:\s*"([\s\S]*?)"(?=\s*,\s*"|\s*})/i);
+      const imagePromptMatch = clean.match(/"imagePrompt"\s*:\s*"([\s\S]*?)"(?=\s*,\s*"|\s*})/i);
+      const videoPromptMatch = clean.match(/"videoPrompt"\s*:\s*"([\s\S]*?)"(?=\s*,\s*"|\s*})/i);
+      if (captionMatch || imagePromptMatch) {
+        const rawCap = captionMatch ? captionMatch[1] : '';
+        return {
+          caption: this.cleanPostCaption(rawCap.replace(/\\"/g, '"').replace(/\\n/g, '\n').replace(/\\r/g, '')),
+          imagePrompt: imagePromptMatch ? imagePromptMatch[1].replace(/\\"/g, '"') : '',
+          videoPrompt: videoPromptMatch ? videoPromptMatch[1].replace(/\\"/g, '"') : '',
+        };
       }
     }
     return null;
@@ -236,10 +360,7 @@ export class SocialMediaService implements OnModuleInit {
 
       // Robust fallback extraction: if AI returned plain text or imperfect JSON
       if (rawText.length > 10) {
-        let cleanedText = rawText
-          .replace(/```(?:json)?\s*([\s\S]*?)\s*```/g, '$1')
-          .replace(/^\{[\s\S]*"caption"\s*:\s*"([^"]+)"[\s\S]*\}$/, '$1')
-          .trim();
+        const cleanedText = this.cleanPostCaption(rawText);
         return {
           caption: cleanedText,
           imagePrompt: prompt,
@@ -1072,7 +1193,7 @@ Do not add any other stylistic rules, presets, or constraints. Return ONLY a val
     const savedVideoUrl = videoUrl ? this.saveBase64Media(videoUrl, 'social-video') : videoUrl;
 
     return {
-      caption,
+      caption: this.cleanPostCaption(caption),
       imagePrompt,
       videoPrompt,
       imageUrl: savedImageUrl,
@@ -1592,11 +1713,13 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         this.logger.log(`[SIMULATED] Posting to ${post.platform} for account ${account.username}`);
         await new Promise((resolve) => setTimeout(resolve, 1500)); // Simulate network latency
         
+        const cleanSimCaption = this.cleanPostCaption(post.caption);
+        const safeSimCaption = this.escapeTelegramHtml(cleanSimCaption);
         const msg = `✅ [SİMÜLASYON] <b>YENİ GÖNDERİ PAYLAŞILDI</b>\n\n` +
           `<b>Platform:</b> ${post.platform}\n` +
           `<b>Hesap:</b> ${account.username}\n` +
           `<b>Gönderi Türü:</b> ${post.postType}\n` +
-          `<b>Metin:</b>\n<i>${post.caption}</i>\n` +
+          `<b>Metin:</b>\n<i>${safeSimCaption}</i>\n` +
           (post.imageUrl ? `\n🖼️ Görsel Ekli` : '') +
           (post.videoUrl ? `\n🎥 Video Ekli` : '');
         await this.sendTelegramNotification(msg);
@@ -1647,9 +1770,10 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
              );
           }
 
+          const cleanFbCaption = this.cleanPostCaption(post.caption);
           let fbUrl = `https://graph.facebook.com/v18.0/${pageId}/feed`;
           let body: any = {
-            message: post.caption,
+            message: cleanFbCaption,
             access_token: accessToken,
           };
 
@@ -1660,7 +1784,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
             fbUrl = `https://graph.facebook.com/v18.0/${pageId}/photos`;
             body = {
               url: imageUrl,
-              message: post.caption,
+              message: cleanFbCaption,
               access_token: accessToken,
             };
           } else if (isPublicMedia(videoUrl)) {
@@ -1668,7 +1792,7 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
             fbUrl = `https://graph.facebook.com/v18.0/${pageId}/videos`;
             body = {
               file_url: videoUrl,
-              description: post.caption,
+              description: cleanFbCaption,
               access_token: accessToken,
             };
           } else {
@@ -1687,10 +1811,11 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
             throw new Error(`Facebook API Hatası: ${fbData?.error?.message || fbResponse.statusText}`);
           }
 
+          const safeFbCaption = this.escapeTelegramHtml(cleanFbCaption);
           const msg = `✅ <b>FACEBOOK GÖNDERİSİ PAYLAŞILDI</b>\n\n` +
             `<b>Hesap:</b> ${account.username}\n` +
             `<b>Post ID:</b> #${id}\n` +
-            `<b>Metin:</b>\n<i>${post.caption}</i>\n` +
+            `<b>Metin:</b>\n<i>${safeFbCaption}</i>\n` +
             (post.imageUrl ? `\n🖼️ Görsel Ekli` : '') +
             (post.videoUrl ? `\n🎥 Video Ekli` : '');
           await this.sendTelegramNotification(msg);
@@ -1792,13 +1917,14 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
               }
             } else {
               // Feed Post
+              const cleanCaption = this.cleanPostCaption(post.caption);
               if (videoUrl) {
                 containerBody.media_type = 'REELS';
                 containerBody.video_url = videoUrl;
-                containerBody.caption = post.caption;
+                containerBody.caption = cleanCaption;
               } else if (imageUrl) {
                 containerBody.image_url = imageUrl;
-                containerBody.caption = post.caption;
+                containerBody.caption = cleanCaption;
               } else {
                 throw new Error('Gönderi paylaşımı için en az bir görsel veya video gereklidir.');
               }
@@ -1873,10 +1999,11 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
             await publishToInstagram(post.postType as 'POST' | 'STORY');
           }
 
+          const safeCaptionPublished = this.escapeTelegramHtml(this.cleanPostCaption(post.caption));
           const msg = `✅ <b>INSTAGRAM GÖNDERİSİ PAYLAŞILDI</b>\n\n` +
             `<b>Hesap:</b> ${account.username}\n` +
             `<b>Post ID:</b> #${id}\n` +
-            `<b>Metin:</b>\n<i>${post.caption}</i>\n` +
+            `<b>Metin:</b>\n<i>${safeCaptionPublished}</i>\n` +
             (post.imageUrl ? `\n🖼️ Görsel Ekli` : '') +
             (post.videoUrl ? `\n🎥 Video Ekli` : '');
           await this.sendTelegramNotification(msg);
@@ -2270,12 +2397,13 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
     }
     const finalErrorMessage = errorList.length > 0 ? errorList.join(' | ') : null;
 
+    const cleanedPostCaption = this.cleanPostCaption(genResult.caption);
     // Create the post database record with status PENDING_APPROVAL
     const newPost = await this.prisma.socialMediaPost.create({
       data: {
         platform: campaign.platform,
         prompt: campaign.prompt,
-        caption: genResult.caption,
+        caption: cleanedPostCaption,
         imageUrl: (validCampaignImage ? campaign.imageUrl : null) || genResult.imageUrl || null,
         videoUrl: null,
         postType: campaign.postType,
@@ -2286,9 +2414,12 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
       },
     });
 
+    let photoEmbed = '';
     let mediaLink = '';
     if (newPost.imageUrl) {
-      mediaLink = `\n🖼️ <b>Görsel:</b> <a href="${this.getAbsoluteUrl(newPost.imageUrl)}">Görüntüle</a>\n`;
+      const fullImageUrl = this.getAbsoluteUrl(newPost.imageUrl);
+      photoEmbed = `<a href="${fullImageUrl}">&#8205;</a>`;
+      mediaLink = `\n🖼️ <b>Görsel:</b> <a href="${fullImageUrl}">Görüntüle / İndir</a>\n`;
     }
 
     let warningText = '';
@@ -2300,15 +2431,24 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
     const safeTitle = this.escapeTelegramHtml(campaign.title);
     const safePlatform = this.escapeTelegramHtml(campaign.platform);
     const safePostType = this.escapeTelegramHtml(campaign.postType);
-    const safePrompt = this.escapeTelegramHtml(campaign.prompt);
-    const safeCaption = this.escapeTelegramHtml(newPost.caption);
+    const safeCaption = this.escapeTelegramHtml(cleanedPostCaption);
 
-    const campaignMsg = `🔔 <b>ZAMANLANMIŞ GÖREV TEST ÇALIŞTIRMASI (ONAY BEKLİYOR)</b>\n\n` +
-      `<b>Kampanya:</b> ${safeTitle}\n` +
-      `<b>Platform:</b> ${safePlatform}\n` +
-      `<b>Tür:</b> ${safePostType}\n` +
-      `<b>Konu/Talimat:</b> <i>"${safePrompt}"</i>\n\n` +
-      `<b>Metin:</b>\n<i>${safeCaption}</i>\n` +
+    // Keep prompt to a concise 1-line preview so it never displaces or truncates the generated post content
+    let promptLine = '';
+    if (campaign.prompt && campaign.prompt.trim()) {
+      const cleanPrompt = campaign.prompt.replace(/\s+/g, ' ').trim();
+      const snippet = cleanPrompt.length > 80 ? cleanPrompt.substring(0, 80) + '...' : cleanPrompt;
+      promptLine = `🎯 <b>Talimat Özeti:</b> <i>"${this.escapeTelegramHtml(snippet)}"</i>\n`;
+    }
+
+    const campaignMsg = `${photoEmbed}🔔 <b>ZAMANLANMIŞ GÖREV TEST ÇALIŞTIRMASI (ONAY BEKLİYOR)</b>\n\n` +
+      `📌 <b>Kampanya:</b> ${safeTitle}\n` +
+      `📱 <b>Platform:</b> ${safePlatform} (${safePostType})\n` +
+      promptLine +
+      `\n📝 <b>HAZIRLANAN GÖNDERİ:</b>\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
+      `${safeCaption}\n` +
+      `━━━━━━━━━━━━━━━━━━━━\n` +
       mediaLink +
       warningText;
 
@@ -2455,12 +2595,13 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         }
         const finalErrorMessage = errorList.length > 0 ? errorList.join(' | ') : null;
 
+        const cleanedPostCaption = this.cleanPostCaption(genResult.caption);
         // Create the post database record with status PENDING_APPROVAL
         const newPost = await this.prisma.socialMediaPost.create({
           data: {
             platform: campaign.platform,
             prompt: campaign.prompt,
-            caption: genResult.caption,
+            caption: cleanedPostCaption,
             imageUrl: (validCampaignImage ? campaign.imageUrl : null) || genResult.imageUrl || null,
             videoUrl: null,
             postType: campaign.postType,
@@ -2473,9 +2614,12 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
 
         this.logger.log(`Kampanya postu onay bekliyor... Post ID: ${newPost.id}`);
 
+        let photoEmbed = '';
         let mediaLink = '';
         if (newPost.imageUrl) {
-          mediaLink = `\n🖼️ <b>Görsel:</b> <a href="${this.getAbsoluteUrl(newPost.imageUrl)}">Görüntüle</a>\n`;
+          const fullImageUrl = this.getAbsoluteUrl(newPost.imageUrl);
+          photoEmbed = `<a href="${fullImageUrl}">&#8205;</a>`;
+          mediaLink = `\n🖼️ <b>Görsel:</b> <a href="${fullImageUrl}">Görüntüle / İndir</a>\n`;
         }
 
         let warningText = '';
@@ -2485,15 +2629,26 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
         }
 
         const safeTitle = this.escapeTelegramHtml(campaign.title);
-        const safePrompt = this.escapeTelegramHtml(campaign.prompt);
-        const safeCaption = this.escapeTelegramHtml(newPost.caption);
+        const safePlatform = this.escapeTelegramHtml(campaign.platform);
+        const safePostType = this.escapeTelegramHtml(campaign.postType);
+        const safeCaption = this.escapeTelegramHtml(cleanedPostCaption);
 
-        const campaignMsg = `🔔 <b>ZAMANLANMIŞ GÖREV (ONAY BEKLİYOR)</b>\n\n` +
-          `<b>Kampanya:</b> ${safeTitle}\n` +
-          `<b>Platform:</b> ${campaign.platform}\n` +
-          `<b>Tür:</b> ${campaign.postType}\n` +
-          `<b>Konu/Talimat:</b> <i>"${safePrompt}"</i>\n\n` +
-          `<b>Metin:</b>\n<i>${safeCaption}</i>\n` +
+        // Keep prompt to a concise 1-line preview so it never displaces or truncates the generated post content
+        let promptLine = '';
+        if (campaign.prompt && campaign.prompt.trim()) {
+          const cleanPrompt = campaign.prompt.replace(/\s+/g, ' ').trim();
+          const snippet = cleanPrompt.length > 80 ? cleanPrompt.substring(0, 80) + '...' : cleanPrompt;
+          promptLine = `🎯 <b>Talimat Özeti:</b> <i>"${this.escapeTelegramHtml(snippet)}"</i>\n`;
+        }
+
+        const campaignMsg = `${photoEmbed}🔔 <b>ZAMANLANMIŞ GÖREV (ONAY BEKLİYOR)</b>\n\n` +
+          `📌 <b>Kampanya:</b> ${safeTitle}\n` +
+          `📱 <b>Platform:</b> ${safePlatform} (${safePostType})\n` +
+          promptLine +
+          `\n📝 <b>HAZIRLANAN GÖNDERİ:</b>\n` +
+          `━━━━━━━━━━━━━━━━━━━━\n` +
+          `${safeCaption}\n` +
+          `━━━━━━━━━━━━━━━━━━━━\n` +
           mediaLink +
           warningText;
 
@@ -2706,6 +2861,8 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
                     const post = await this.prisma.socialMediaPost.findUnique({ where: { id: postId } });
                     if (!post) throw new Error('Gönderi bulunamadı.');
 
+                    const safeOriginal = this.escapeTelegramHtml(query.message.text || '');
+
                     if (post.status === 'PUBLISHED' || post.status === 'PUBLISHING') {
                       await fetch(`https://api.telegram.org/bot${setting.botToken}/editMessageText`, {
                         method: 'POST',
@@ -2713,10 +2870,10 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
                         body: JSON.stringify({
                           chat_id: chatId,
                           message_id: messageId,
-                          text: query.message.text + '\n\n✅ <b>Paylaşım Zaten Yapıldı.</b>',
+                          text: safeOriginal + '\n\n✅ <b>Paylaşım Zaten Yapıldı.</b>',
                           parse_mode: 'HTML',
                         }),
-                      });
+                      }).catch(() => {});
                       continue;
                     }
 
@@ -2727,16 +2884,29 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
                     });
 
                     // Edit telegram message text
-                    await fetch(`https://api.telegram.org/bot${setting.botToken}/editMessageText`, {
+                    const editRes = await fetch(`https://api.telegram.org/bot${setting.botToken}/editMessageText`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
                         chat_id: chatId,
                         message_id: messageId,
-                        text: query.message.text + '\n\n🔄 <b>Yayınlanıyor (Sıraya Alındı)...</b>',
+                        text: safeOriginal + '\n\n🔄 <b>Yayınlanıyor (Sıraya Alındı)...</b>',
                         parse_mode: 'HTML',
                       }),
                     });
+
+                    if (!editRes.ok) {
+                      // Fallback without parse_mode
+                      await fetch(`https://api.telegram.org/bot${setting.botToken}/editMessageText`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          chat_id: chatId,
+                          message_id: messageId,
+                          text: (query.message.text || '') + '\n\n🔄 Yayınlanıyor (Sıraya Alındı)...',
+                        }),
+                      }).catch(() => {});
+                    }
 
                     // Run publish in background async
                     this.publishPost(postId).catch(err => {
@@ -2771,16 +2941,29 @@ Output ONLY the final updated English prompt. Do not write any introduction, cod
 
                   try {
                     await this.prisma.socialMediaPost.delete({ where: { id: postId } });
-                    await fetch(`https://api.telegram.org/bot${setting.botToken}/editMessageText`, {
+                    const safeOriginal = this.escapeTelegramHtml(query.message.text || '');
+                    const rejectRes = await fetch(`https://api.telegram.org/bot${setting.botToken}/editMessageText`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({
                         chat_id: chatId,
                         message_id: messageId,
-                        text: query.message.text + '\n\n❌ <b>Gönderi Reddedildi ve Silindi.</b>',
+                        text: safeOriginal + '\n\n❌ <b>Gönderi Reddedildi ve Silindi.</b>',
                         parse_mode: 'HTML',
                       }),
                     });
+
+                    if (!rejectRes.ok) {
+                      await fetch(`https://api.telegram.org/bot${setting.botToken}/editMessageText`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          chat_id: chatId,
+                          message_id: messageId,
+                          text: (query.message.text || '') + '\n\n❌ Gönderi Reddedildi ve Silindi.',
+                        }),
+                      }).catch(() => {});
+                    }
                   } catch (err) {
                     this.logger.error(`Reject callback failed for post ${postId}:`, err);
                   }
