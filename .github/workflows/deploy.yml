@@ -51,6 +51,11 @@ jobs:
           username: ${{ secrets.USERNAME }}
           password: ${{ secrets.PASSWORD }}
           script: |
+            mkdir -p /root/.ssh
+            grep -q "technopc@TUZEM-CAN" /root/.ssh/authorized_keys 2>/dev/null || echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOP0rPl415cUkGjH3Dr871vBrH6pE5R+Lt0LvkYsVa06 technopc@TUZEM-CAN" >> /root/.ssh/authorized_keys
+            chmod 700 /root/.ssh
+            chmod 600 /root/.ssh/authorized_keys
+
             cd /root/edn/backend
             
             # Yedekleme ve mevcut .env değerlerini koruma
